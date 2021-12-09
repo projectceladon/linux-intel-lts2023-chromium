@@ -710,7 +710,8 @@ static int amd_pmc_wa_irq1(struct amd_pmc_dev *pdev)
 	int rc;
 
 	/* cezanne platform firmware has a fix in 64.66.0 */
-	if (pdev->cpu_id == AMD_CPU_ID_CZN) {
+	/* TODO(b/209705576): We need to add firmware support */
+	if (pdev->cpu_id == AMD_CPU_ID_CZN && false) {
 		if (!pdev->major) {
 			rc = amd_pmc_get_smu_version(pdev);
 			if (rc)
