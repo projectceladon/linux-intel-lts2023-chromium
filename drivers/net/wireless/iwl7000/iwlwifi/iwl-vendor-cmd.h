@@ -172,6 +172,8 @@ enum iwl_mvm_vendor_cmd {
 	IWL_MVM_VENDOR_CMD_GEO_SAR_GET_TABLE                    = 0x35,
 	IWL_MVM_VENDOR_CMD_SGOM_GET_TABLE			= 0x36,
 	IWL_MVM_VENDOR_CMD_RFIM_SET_CNVI_MASTER			= 0x37,
+	IWL_MVM_VENDOR_CMD_GET_FW_VERSION			= 0x41,
+	IWL_MVM_VENDOR_CMD_GET_DRV_VERSION			= 0x42,
 };
 
 /**
@@ -799,6 +801,8 @@ enum iwl_vendor_auth_akm_mode {
  * @IWL_MVM_VENDOR_ATTR_RFIM_FREQ: RFIM frequency (u16)
  * @IWL_MVM_VENDOR_ATTR_RFIM_INFO: overall RFIM info (nested)
  * @IWL_MVM_VENDOR_ATTR_RFIM_CNVI_MASTER: CNVI master configuration (u32)
+ * @IWL_MVM_VENDOR_ATTR_DRV_VER: string attribute
+ * @IWL_MVM_VENDOR_ATTR_FW_VER: string attribute
  *
  * @NUM_IWL_MVM_VENDOR_ATTR: number of vendor attributes
  * @MAX_IWL_MVM_VENDOR_ATTR: highest vendor attribute number
@@ -915,6 +919,8 @@ enum iwl_mvm_vendor_attr {
 	IWL_MVM_VENDOR_ATTR_GEO_SAR_VER                         = 0x77,
 	IWL_MVM_VENDOR_ATTR_SGOM_TABLE				= 0x78,
 	IWL_MVM_VENDOR_ATTR_RFIM_CNVI_MASTER			= 0x79,
+	IWL_MVM_VENDOR_ATTR_FW_VER				= 0x81,
+	IWL_MVM_VENDOR_ATTR_DRV_VER				= 0x82,
 
 	NUM_IWL_MVM_VENDOR_ATTR,
 	MAX_IWL_MVM_VENDOR_ATTR = NUM_IWL_MVM_VENDOR_ATTR - 1,
