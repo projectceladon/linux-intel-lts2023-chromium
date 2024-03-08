@@ -97,6 +97,7 @@
 #define KVM_PFN_ERR_HWPOISON	(KVM_PFN_ERR_MASK + 1)
 #define KVM_PFN_ERR_RO_FAULT	(KVM_PFN_ERR_MASK + 2)
 #define KVM_PFN_ERR_SIGPENDING	(KVM_PFN_ERR_MASK + 3)
+#define KVM_PFN_ERR_NEEDS_IO	(KVM_PFN_ERR_MASK + 4)
 
 /*
  * error pfns indicate that the gfn is in slot but faild to
@@ -270,8 +271,6 @@ bool kvm_unmap_gfn_range(struct kvm *kvm, struct kvm_gfn_range *range);
 bool kvm_age_gfn(struct kvm *kvm, struct kvm_gfn_range *range);
 bool kvm_test_age_gfn(struct kvm *kvm, struct kvm_gfn_range *range);
 bool kvm_set_spte_gfn(struct kvm *kvm, struct kvm_gfn_range *range);
-bool kvm_arch_test_clear_young(struct kvm *kvm, struct kvm_gfn_range *range,
-			       gfn_t lsb_gfn, unsigned long *bitmap);
 #endif
 
 enum {
@@ -296,6 +295,7 @@ struct kvm_host_map {
 	void *hva;
 	kvm_pfn_t pfn;
 	kvm_pfn_t gfn;
+	bool is_refcounted_page;
 };
 
 /*
@@ -1190,6 +1190,55 @@ unsigned long gfn_to_hva_memslot_prot(struct kvm_memory_slot *slot, gfn_t gfn,
 void kvm_release_page_clean(struct page *page);
 void kvm_release_page_dirty(struct page *page);
 
+void kvm_set_page_accessed(struct page *page);
+void kvm_set_page_dirty(struct page *page);
+
+struct kvm_follow_pfn {
+	const struct kvm_memory_slot *slot;
+	gfn_t gfn;
+	/* FOLL_* flags modifying lookup behavior. */
+	unsigned int flags;
+	/* Whether this function can sleep. */
+	bool atomic;
+	/* Try to create a writable mapping even for a read fault. */
+	bool try_map_writable;
+	/*
+	 * Usage of the returned pfn will be guared by a mmu notifier. If
+	 * FOLL_GET is not set, this must be true.
+	 */
+	bool guarded_by_mmu_notifier;
+	/*
+	 * When false, do not return pfns for non-refcounted struct pages.
+	 *
+	 * This allows callers to continue to rely on the legacy behavior
+	 * where pfs returned by gfn_to_pfn can be safely passed to
+	 * kvm_release_pfn without worrying about corrupting the refcount of
+	 * non-refcounted pages.
+	 *
+	 * Callers that opt into non-refcount struct pages need to track
+	 * whether or not the returned pages are refcounted and avoid touching
+	 * them when they are not. Some architectures may not have enough
+	 * free space in PTEs to do this.
+	 */
+	bool allow_non_refcounted_struct_page;
+
+	/* Outputs of kvm_follow_pfn */
+	hva_t hva;
+	bool writable;
+	/*
+	 * Non-NULL if the returned pfn is for a page with a valid refcount,
+	 * NULL if the returned pfn has no struct page or if the struct page is
+	 * not being refcounted (e.g. tail pages of non-compound higher order
+	 * allocations from IO/PFNMAP mappings).
+	 *
+	 * NOTE: This will still be set if FOLL_GET is not specified, but the
+	 *       returned page will not have an elevated refcount.
+	 */
+	struct page *refcounted_page;
+};
+
+kvm_pfn_t kvm_follow_pfn(struct kvm_follow_pfn *kfp);
+
 kvm_pfn_t gfn_to_pfn(struct kvm *kvm, gfn_t gfn);
 kvm_pfn_t gfn_to_pfn_prot(struct kvm *kvm, gfn_t gfn, bool write_fault,
 		      bool *writable);
@@ -1199,26 +1248,11 @@ kvm_pfn_t __gfn_to_pfn_memslot(const struct kvm_memory_slot *slot, gfn_t gfn,
 			       bool atomic, bool interruptible, bool *async,
 			       bool write_fault, bool *writable, hva_t *hva);
 
-kvm_pfn_t gfn_to_pfn_page(struct kvm *kvm, gfn_t gfn, struct page **page);
-kvm_pfn_t gfn_to_pfn_page_prot(struct kvm *kvm, gfn_t gfn,
-			       bool write_fault, bool *writable,
-			       struct page **page);
-kvm_pfn_t gfn_to_pfn_page_memslot(const struct kvm_memory_slot *slot,
-				  gfn_t gfn, struct page **page);
-kvm_pfn_t gfn_to_pfn_page_memslot_atomic(const struct kvm_memory_slot *slot,
-					 gfn_t gfn, struct page **page);
-kvm_pfn_t __gfn_to_pfn_page_memslot(const struct kvm_memory_slot *slot,
-				    gfn_t gfn, bool atomic, bool interruptible,
-				    bool *async, bool write_fault,
-				    bool *writable, hva_t *hva,
-				    struct page **page);
-
 void kvm_release_pfn_clean(kvm_pfn_t pfn);
 void kvm_release_pfn_dirty(kvm_pfn_t pfn);
 void kvm_set_pfn_dirty(kvm_pfn_t pfn);
 void kvm_set_pfn_accessed(kvm_pfn_t pfn);
 
-void kvm_release_pfn(kvm_pfn_t pfn, bool dirty);
 int kvm_read_guest_page(struct kvm *kvm, gfn_t gfn, void *data, int offset,
 			int len);
 int kvm_read_guest(struct kvm *kvm, gpa_t gpa, void *data, unsigned long len);
@@ -1292,10 +1326,6 @@ void mark_page_dirty(struct kvm *kvm, gfn_t gfn);
 struct kvm_memslots *kvm_vcpu_memslots(struct kvm_vcpu *vcpu);
 struct kvm_memory_slot *kvm_vcpu_gfn_to_memslot(struct kvm_vcpu *vcpu, gfn_t gfn);
 kvm_pfn_t kvm_vcpu_gfn_to_pfn_atomic(struct kvm_vcpu *vcpu, gfn_t gfn);
-kvm_pfn_t kvm_vcpu_gfn_to_pfn_page_atomic(struct kvm_vcpu *vcpu, gfn_t gfn,
-					  struct page **page);
-kvm_pfn_t kvm_vcpu_gfn_to_pfn_page(struct kvm_vcpu *vcpu, gfn_t gfn,
-				   struct page **page);
 kvm_pfn_t kvm_vcpu_gfn_to_pfn(struct kvm_vcpu *vcpu, gfn_t gfn);
 int kvm_vcpu_map(struct kvm_vcpu *vcpu, gpa_t gpa, struct kvm_host_map *map);
 void kvm_vcpu_unmap(struct kvm_vcpu *vcpu, struct kvm_host_map *map, bool dirty);
@@ -2348,32 +2378,6 @@ static inline void kvm_account_pgtable_pages(void *virt, int nr)
 
 /* Max number of entries allowed for each kvm dirty ring */
 #define  KVM_DIRTY_RING_MAX_ENTRIES  65536
-
-/*
- * Architectures that implement kvm_arch_test_clear_young() should override
- * kvm_arch_has_test_clear_young().
- *
- * kvm_arch_has_test_clear_young() is allowed to return false positive. It can
- * return true if kvm_arch_test_clear_young() is supported but disabled due to
- * some runtime constraint. In this case, kvm_arch_test_clear_young() should
- * return false.
- *
- * The last parameter to kvm_arch_test_clear_young() is a bitmap with the
- * following specifications:
- * 1. The offset of each bit is relative to the second to the last parameter
- *    lsb_gfn. E.g., the offset corresponding to gfn is lsb_gfn-gfn. This is
- *    convenient for batching while forward looping.
- * 2. For each KVM PTE with the accessed bit set, the implementation should flip
- *    the corresponding bit in the bitmap. It should only clear the accessed bit
- *    if the old value is 1. This allows the caller to test or test and clear
- *    the accessed bit.
- */
-#ifndef kvm_arch_has_test_clear_young
-static inline bool kvm_arch_has_test_clear_young(void)
-{
-	return false;
-}
-#endif
 
 #ifdef CONFIG_KVM_VIRT_SUSPEND_TIMING
 bool virt_suspend_time_enabled(struct kvm *kvm);

@@ -58,6 +58,7 @@
 #include "amdgpu_ras.h"
 #include "amdgpu_hmm.h"
 #include "amdgpu_atomfirmware.h"
+#include "amdgpu_dma_buf.h"
 #include "amdgpu_res_cursor.h"
 #include "bif/bif_4_1_d.h"
 
@@ -545,10 +546,11 @@ static int amdgpu_bo_move(struct ttm_buffer_object *bo, bool evict,
 			return r;
 	}
 
+	trace_amdgpu_bo_move(abo, new_mem->mem_type, old_mem->mem_type);
 out:
 	/* update statistics */
 	atomic64_add(bo->base.size, &adev->num_bytes_moved);
-	amdgpu_bo_move_notify(bo, evict, new_mem);
+	amdgpu_bo_move_notify(bo, evict);
 	return 0;
 }
 
@@ -868,6 +870,7 @@ static void amdgpu_ttm_gart_bind(struct amdgpu_device *adev,
 		amdgpu_gart_bind(adev, gtt->offset, ttm->num_pages,
 				 gtt->ttm.dma_address, flags);
 	}
+	gtt->bound = true;
 }
 
 /*
@@ -1555,7 +1558,7 @@ static int amdgpu_ttm_access_memory(struct ttm_buffer_object *bo,
 static void
 amdgpu_bo_delete_mem_notify(struct ttm_buffer_object *bo)
 {
-	amdgpu_bo_move_notify(bo, false, NULL);
+	amdgpu_bo_move_notify(bo, false);
 }
 
 static struct ttm_device_funcs amdgpu_bo_driver = {
@@ -2128,6 +2131,14 @@ static int amdgpu_ttm_prepare_job(struct amdgpu_device *adev,
 
 	return drm_sched_job_add_resv_dependencies(&(*job)->base, resv,
 						   DMA_RESV_USAGE_BOOKKEEP);
+}
+
+int amdgpu_mmap(struct file *filp, struct vm_area_struct *vma)
+{
+	if (amdgpu_try_dma_buf_mmap(filp, vma) == 0)
+		return 0;
+
+	return drm_gem_mmap(filp, vma);
 }
 
 int amdgpu_copy_buffer(struct amdgpu_ring *ring, uint64_t src_offset,

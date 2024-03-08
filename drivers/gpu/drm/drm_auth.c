@@ -240,7 +240,8 @@ drm_master_check_perm(struct drm_device *dev, struct drm_file *file_priv)
 	 * drm_master_relax. With frecon, the was_master flag is true, but the
 	 * file pid and the task pid pointers (and the actual PIDs) don't match.
 	 */
-	if ((drm_master_relax || file_priv->pid == task_pid(current)) && file_priv->was_master)
+	if (file_priv->was_master &&
+	    (drm_master_relax || rcu_access_pointer(file_priv->pid) == task_tgid(current)))
 		return 0;
 
 	if (!capable(CAP_SYS_ADMIN))

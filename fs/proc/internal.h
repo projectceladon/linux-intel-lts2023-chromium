@@ -95,9 +95,6 @@ union proc_op {
 	const char *lsm;
 };
 
-
-extern const struct file_operations proc_totmaps_operations;
-
 struct proc_inode {
 	struct pid *pid;
 	unsigned int fd;
@@ -295,9 +292,6 @@ struct proc_maps_private {
 	struct task_struct *task;
 	struct mm_struct *mm;
 	struct vma_iterator iter;
-#ifdef CONFIG_MMU
-	struct mem_size_stats *mss;
-#endif
 #ifdef CONFIG_NUMA
 	struct mempolicy *task_mempolicy;
 #endif

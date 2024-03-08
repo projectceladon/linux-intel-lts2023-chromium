@@ -286,7 +286,9 @@ static void fsm_routine_stopping(struct t7xx_fsm_ctl *ctl, struct t7xx_fsm_comma
 	struct cldma_ctrl *md_ctrl;
 	int err;
 
-	if (ctl->curr_state == FSM_STATE_STOPPED || ctl->curr_state == FSM_STATE_STOPPING) {
+	if (ctl->curr_state == FSM_STATE_STOPPED ||
+	    ctl->curr_state == FSM_STATE_STOPPING ||
+	    ctl->md->rgu_irq_asserted) {
 		fsm_finish_command(ctl, cmd, -EINVAL);
 		return;
 	}
@@ -298,24 +300,22 @@ static void fsm_routine_stopping(struct t7xx_fsm_ctl *ctl, struct t7xx_fsm_comma
 	t7xx_fsm_broadcast_state(ctl, MD_STATE_WAITING_TO_STOP);
 	t7xx_cldma_stop(md_ctrl);
 
-	if (!ctl->md->rgu_irq_asserted) {
-		if (t7xx_devlink_param_get_fastboot(t7xx_dev->dl->ctx))
-			t7xx_host_event_notify(ctl->md, FASTBOOT_DL_NOTIFY);
+	if (t7xx_devlink_param_get_fastboot(t7xx_dev->dl->ctx))
+		t7xx_host_event_notify(ctl->md, FASTBOOT_DL_NOTIFY);
 
-		t7xx_mhccif_h2d_swint_trigger(t7xx_dev, H2D_CH_DRM_DISABLE_AP);
-		/* Wait for the DRM disable to take effect */
-		msleep(FSM_DRM_DISABLE_DELAY_MS);
+	t7xx_mhccif_h2d_swint_trigger(t7xx_dev, H2D_CH_DRM_DISABLE_AP);
+	/* Wait for the DRM disable to take effect */
+	msleep(FSM_DRM_DISABLE_DELAY_MS);
 
-		if (t7xx_devlink_param_get_fastboot(t7xx_dev->dl->ctx)) {
-			/* Do not try fldr because device will always wait for
-			 * MHCCIF bit 13 in fastboot download flow.
-			 */
+	if (t7xx_devlink_param_get_fastboot(t7xx_dev->dl->ctx)) {
+		/* Do not try fldr because device will always wait for
+		 * MHCCIF bit 13 in fastboot download flow.
+		 */
+		t7xx_mhccif_h2d_swint_trigger(t7xx_dev, H2D_CH_DEVICE_RESET);
+	} else {
+		err = t7xx_acpi_fldr_func(t7xx_dev);
+		if (err)
 			t7xx_mhccif_h2d_swint_trigger(t7xx_dev, H2D_CH_DEVICE_RESET);
-		} else {
-			err = t7xx_acpi_fldr_func(t7xx_dev);
-			if (err)
-				t7xx_mhccif_h2d_swint_trigger(t7xx_dev, H2D_CH_DEVICE_RESET);
-		}
 	}
 
 	fsm_finish_command(ctl, cmd, fsm_stopped_handler(ctl));
@@ -413,7 +413,7 @@ static void fsm_routine_start(struct t7xx_fsm_ctl *ctl, struct t7xx_fsm_command 
 		goto finish_command;
 	}
 
-	if (status != ctl->prev_status) {
+	if (status != ctl->prev_status || cmd->flag != 0) {
 		stage = FIELD_GET(MISC_STAGE_MASK, status);
 		switch (stage) {
 		case T7XX_DEV_STAGE_INIT:
@@ -430,10 +430,12 @@ static void fsm_routine_start(struct t7xx_fsm_ctl *ctl, struct t7xx_fsm_command 
 
 		case T7XX_DEV_STAGE_LINUX:
 			dev_info(dev, "LINUX_STAGE Entered\n");
-			t7xx_cldma_hif_hw_init(md->md_ctrl[CLDMA_ID_AP]);
-			t7xx_cldma_hif_hw_init(md->md_ctrl[CLDMA_ID_MD]);
 			t7xx_mhccif_mask_clr(md->t7xx_dev, D2H_INT_PORT_ENUM |
 					     D2H_INT_ASYNC_MD_HK | D2H_INT_ASYNC_AP_HK);
+			if (cmd->flag == 0)
+				break;
+			t7xx_cldma_hif_hw_init(md->md_ctrl[CLDMA_ID_AP]);
+			t7xx_cldma_hif_hw_init(md->md_ctrl[CLDMA_ID_MD]);
 			t7xx_port_proxy_set_cfg(md, PORT_CFG_ID_NORMAL);
 			ret = fsm_routine_starting(ctl);
 			break;

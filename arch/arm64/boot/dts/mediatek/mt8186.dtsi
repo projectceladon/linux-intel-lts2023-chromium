@@ -23,7 +23,7 @@
 
 	aliases {
 		ovl0 = &ovl0;
-		ovl_2l0 = &ovl_2l0;
+		ovl-2l0 = &ovl_2l0;
 		rdma0 = &rdma0;
 		rdma1 = &rdma1;
 	};
@@ -925,17 +925,24 @@
 					reg = <MT8186_POWER_DOMAIN_CSIRX_TOP>;
 					clocks = <&topckgen CLK_TOP_SENINF>,
 						 <&topckgen CLK_TOP_SENINF1>;
-					clock-names = "csirx_top0", "csirx_top1";
+					clock-names = "subsys-csirx-top0",
+						      "subsys-csirx-top1";
 					#power-domain-cells = <0>;
 				};
 
 				power-domain@MT8186_POWER_DOMAIN_SSUSB {
 					reg = <MT8186_POWER_DOMAIN_SSUSB>;
+					clocks = <&topckgen CLK_TOP_USB_TOP>,
+						 <&infracfg_ao CLK_INFRA_AO_SSUSB_TOP_REF>;
+					clock-names = "sys_ck", "ref_ck";
 					#power-domain-cells = <0>;
 				};
 
 				power-domain@MT8186_POWER_DOMAIN_SSUSB_P1 {
 					reg = <MT8186_POWER_DOMAIN_SSUSB_P1>;
+					clocks = <&infracfg_ao CLK_INFRA_AO_SSUSB_TOP_P1_SYS>,
+						 <&infracfg_ao CLK_INFRA_AO_SSUSB_TOP_P1_REF>;
+					clock-names = "sys_ck", "ref_ck";
 					#power-domain-cells = <0>;
 				};
 
@@ -943,7 +950,8 @@
 					reg = <MT8186_POWER_DOMAIN_ADSP_AO>;
 					clocks = <&topckgen CLK_TOP_AUDIODSP>,
 						 <&topckgen CLK_TOP_ADSP_BUS>;
-					clock-names = "audioadsp", "adsp_bus";
+					clock-names = "audioadsp",
+						      "subsys-adsp-bus";
 					#address-cells = <1>;
 					#size-cells = <0>;
 					#power-domain-cells = <1>;
@@ -976,8 +984,11 @@
 						 <&mmsys CLK_MM_SMI_COMMON>,
 						 <&mmsys CLK_MM_SMI_GALS>,
 						 <&mmsys CLK_MM_SMI_IOMMU>;
-					clock-names = "disp", "mdp", "smi_infra", "smi_common",
-						     "smi_gals", "smi_iommu";
+					clock-names = "disp", "mdp",
+						      "subsys-smi-infra",
+						      "subsys-smi-common",
+						      "subsys-smi-gals",
+						      "subsys-smi-iommu";
 					mediatek,infracfg = <&infracfg_ao>;
 					#address-cells = <1>;
 					#size-cells = <0>;
@@ -994,15 +1005,17 @@
 
 					power-domain@MT8186_POWER_DOMAIN_CAM {
 						reg = <MT8186_POWER_DOMAIN_CAM>;
-						clocks = <&topckgen CLK_TOP_CAM>,
-							 <&topckgen CLK_TOP_SENINF>,
+						clocks = <&topckgen CLK_TOP_SENINF>,
 							 <&topckgen CLK_TOP_SENINF1>,
 							 <&topckgen CLK_TOP_SENINF2>,
 							 <&topckgen CLK_TOP_SENINF3>,
+							 <&camsys CLK_CAM2MM_GALS>,
 							 <&topckgen CLK_TOP_CAMTM>,
-							 <&camsys CLK_CAM2MM_GALS>;
-						clock-names = "cam-top", "cam0", "cam1", "cam2",
-							     "cam3", "cam-tm", "gals";
+							 <&topckgen CLK_TOP_CAM>;
+						clock-names = "cam0", "cam1", "cam2",
+							      "cam3", "gals",
+							      "subsys-cam-tm",
+							      "subsys-cam-top";
 						mediatek,infracfg = <&infracfg_ao>;
 						#address-cells = <1>;
 						#size-cells = <0>;
@@ -1021,9 +1034,9 @@
 
 					power-domain@MT8186_POWER_DOMAIN_IMG {
 						reg = <MT8186_POWER_DOMAIN_IMG>;
-						clocks = <&topckgen CLK_TOP_IMG1>,
-							 <&imgsys1 CLK_IMG1_GALS_IMG1>;
-						clock-names = "img-top", "gals";
+						clocks = <&imgsys1 CLK_IMG1_GALS_IMG1>,
+							 <&topckgen CLK_TOP_IMG1>;
+						clock-names = "gals", "subsys-img-top";
 						mediatek,infracfg = <&infracfg_ao>;
 						#address-cells = <1>;
 						#size-cells = <0>;
@@ -1042,8 +1055,11 @@
 							 <&ipesys CLK_IPE_LARB20>,
 							 <&ipesys CLK_IPE_SMI_SUBCOM>,
 							 <&ipesys CLK_IPE_GALS_IPE>;
-						clock-names = "ipe-top", "ipe-larb0", "ipe-larb1",
-							      "ipe-smi", "ipe-gals";
+						clock-names = "subsys-ipe-top",
+							      "subsys-ipe-larb0",
+							      "subsys-ipe-larb1",
+							      "subsys-ipe-smi",
+							      "subsys-ipe-gals";
 						mediatek,infracfg = <&infracfg_ao>;
 						#power-domain-cells = <0>;
 					};
@@ -1052,7 +1068,7 @@
 						reg = <MT8186_POWER_DOMAIN_VENC>;
 						clocks = <&topckgen CLK_TOP_VENC>,
 							 <&vencsys CLK_VENC_CKE1_VENC>;
-						clock-names = "venc0", "larb";
+						clock-names = "venc0", "subsys-larb";
 						mediatek,infracfg = <&infracfg_ao>;
 						#power-domain-cells = <0>;
 					};
@@ -1062,7 +1078,9 @@
 						clocks = <&topckgen CLK_TOP_WPE>,
 							 <&wpesys CLK_WPE_SMI_LARB8_CK_EN>,
 							 <&wpesys CLK_WPE_SMI_LARB8_PCLK_EN>;
-						clock-names = "wpe0", "larb-ck", "larb-pclk";
+						clock-names = "wpe0",
+							      "subsys-larb-ck",
+							      "subsys-larb-pclk";
 						mediatek,infracfg = <&infracfg_ao>;
 						#power-domain-cells = <0>;
 					};
@@ -1149,14 +1167,14 @@
 			status = "disabled";
 		};
 
-		adsp_mailbox0: mailbox@10686000 {
+		adsp_mailbox0: mailbox@10686100 {
 			compatible = "mediatek,mt8186-adsp-mbox";
 			#mbox-cells = <0>;
 			reg = <0 0x10686100 0 0x1000>;
 			interrupts = <GIC_SPI 361 IRQ_TYPE_LEVEL_HIGH 0>;
 		};
 
-		adsp_mailbox1: mailbox@10687000 {
+		adsp_mailbox1: mailbox@10687100 {
 			compatible = "mediatek,mt8186-adsp-mbox";
 			#mbox-cells = <0>;
 			reg = <0 0x10687100 0 0x1000>;
@@ -1543,8 +1561,9 @@
 			clocks = <&topckgen CLK_TOP_USB_TOP>,
 				 <&infracfg_ao CLK_INFRA_AO_SSUSB_TOP_REF>,
 				 <&infracfg_ao CLK_INFRA_AO_SSUSB_TOP_HCLK>,
-				 <&infracfg_ao CLK_INFRA_AO_ICUSB>;
-			clock-names = "sys_ck", "ref_ck", "mcu_ck", "dma_ck";
+				 <&infracfg_ao CLK_INFRA_AO_ICUSB>,
+				 <&infracfg_ao CLK_INFRA_AO_SSUSB_TOP_XHCI>;
+			clock-names = "sys_ck", "ref_ck", "mcu_ck", "dma_ck", "xhci_ck";
 			interrupts = <GIC_SPI 303 IRQ_TYPE_LEVEL_HIGH 0>;
 			phys = <&u2port0 PHY_TYPE_USB2>;
 			power-domains = <&spm MT8186_POWER_DOMAIN_SSUSB>;
@@ -1649,8 +1668,9 @@
 			clocks = <&infracfg_ao CLK_INFRA_AO_SSUSB_TOP_P1_SYS>,
 				 <&infracfg_ao CLK_INFRA_AO_SSUSB_TOP_P1_REF>,
 				 <&infracfg_ao CLK_INFRA_AO_SSUSB_TOP_P1_HCLK>,
-				 <&clk26m>;
-			clock-names = "sys_ck", "ref_ck", "mcu_ck", "dma_ck";
+				 <&clk26m>,
+				 <&infracfg_ao CLK_INFRA_AO_SSUSB_TOP_P1_XHCI>;
+			clock-names = "sys_ck", "ref_ck", "mcu_ck", "dma_ck", "xhci_ck";
 			interrupts = <GIC_SPI 331 IRQ_TYPE_LEVEL_HIGH 0>;
 			phys = <&u2port1 PHY_TYPE_USB2>, <&u3port1 PHY_TYPE_USB3>;
 			power-domains = <&spm MT8186_POWER_DOMAIN_SSUSB_P1>;
@@ -1734,9 +1754,13 @@
 				reg = <0x550 0x50>;
 			};
 
-			gpu_speedbin: gpu-speed-bin@59c {
+			gpu_speedbin: gpu-speedbin@59c {
 				reg = <0x59c 0x4>;
 				bits = <0 3>;
+			};
+
+			socinfo-data1@7a0 {
+				reg = <0x7a0 0x4>;
 			};
 		};
 

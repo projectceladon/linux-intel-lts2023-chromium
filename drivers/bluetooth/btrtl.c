@@ -1296,6 +1296,18 @@ void btrtl_set_quirks(struct hci_dev *hdev, struct btrtl_device_info *btrtl_dev)
 		break;
 	}
 
+	/* Disallow RTL8822 to remote wakeup, in order to enter
+	 * global suspend and save power.
+	 */
+	if (btrtl_dev->project_id == CHIP_ID_8822C)
+		set_bit(HCI_QUIRK_DISABLE_REMOTE_WAKE, &hdev->quirks);
+
+	/* Force RTL8852A to enable remote wakeup in order to prevent it from
+	 * resetting itself and taking longer to resume from suspend
+	 */
+	if (btrtl_dev->project_id == CHIP_ID_8852A)
+		set_bit(HCI_QUIRK_FORCE_REMOTE_WAKE, &hdev->quirks);
+
 	if (!btrtl_dev->ic_info)
 		return;
 
