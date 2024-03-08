@@ -393,7 +393,6 @@ bool device_is_bound(struct device *dev)
 {
 	return dev->p && klist_node_attached(&dev->p->knode_driver);
 }
-EXPORT_SYMBOL_GPL(device_is_bound);
 
 static void driver_bound(struct device *dev)
 {
@@ -783,7 +782,7 @@ static int really_probe_debug(struct device *dev, struct device_driver *drv)
  *
  * Should somehow figure out how to use a semaphore, not an atomic variable...
  */
-bool __init driver_probe_done(void)
+bool driver_probe_done(void)
 {
 	int local_probe_count = atomic_read(&probe_count);
 

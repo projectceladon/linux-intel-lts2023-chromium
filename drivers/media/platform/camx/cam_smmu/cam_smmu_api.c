@@ -1250,11 +1250,7 @@ static int cam_smmu_map_to_pool(struct iommu_domain *domain,
 	 * iommu_map_sgtable() will map the entire sgtable, even if
 	 * the assumed buffer size is smaller. Use the real buffer size
 	 * for IOVA space allocation to take care of this.
-	 *
-	 * For allocations in CAM_SMMU_REGION_SHARED region the size is zero.
 	 */
-	WARN_ON_ONCE(*size && buffer_size > *size);
-
 	*iova = gen_pool_alloc(pool, buffer_size);
 	if (!*iova)
 		return -ENOMEM;
@@ -1330,7 +1326,7 @@ static int cam_smmu_map_buffer_validate(struct dma_buf *buf,
 		return rc;
 	}
 
-	table = dma_buf_map_attachment(attach, dma_dir);
+	table = dma_buf_map_attachment_unlocked(attach, dma_dir);
 	if (IS_ERR_OR_NULL(table)) {
 		rc = PTR_ERR(table);
 		CAM_ERR(CAM_SMMU, "Error: dma map attachment failed");
@@ -1401,7 +1397,7 @@ static int cam_smmu_map_buffer_validate(struct dma_buf *buf,
 err_free_iova:
 	cam_smmu_unmap_from_pool(cb->domain, pool, *len_ptr, *paddr_ptr);
 err_buf_unmap_attach:
-	dma_buf_unmap_attachment(attach, table, dma_dir);
+	dma_buf_unmap_attachment_unlocked(attach, table, dma_dir);
 err_buf_detach:
 	dma_buf_detach(buf, attach);
 
@@ -1558,7 +1554,7 @@ static int cam_smmu_unmap_buf_and_remove_from_list(
 				 mapping_info->paddr,
 				 mapping_info->len);
 
-	dma_buf_unmap_attachment(mapping_info->attach,
+	dma_buf_unmap_attachment_unlocked(mapping_info->attach,
 		mapping_info->table, mapping_info->dir);
 	dma_buf_detach(mapping_info->buf, mapping_info->attach);
 

@@ -4017,15 +4017,13 @@ static int cam_icp_mgr_update_hfi_frame_process(
 }
 
 static void cam_icp_mgr_print_io_bufs(struct cam_packet *packet,
-	int32_t iommu_hdl, int32_t sec_mmu_hdl, uint32_t pf_buf_info,
-	bool *mem_found)
+	int32_t iommu_hdl, uint32_t pf_buf_info, bool *mem_found)
 {
 	uint64_t   iova_addr;
 	size_t     src_buf_size;
 	int        i;
 	int        j;
 	int        rc = 0;
-	int32_t    mmu_hdl;
 
 	struct cam_buf_io_cfg  *io_cfg = NULL;
 
@@ -4062,11 +4060,8 @@ static void cam_icp_mgr_print_io_bufs(struct cam_packet *packet,
 				io_cfg[i].format,
 				io_cfg[i].direction);
 
-			mmu_hdl = cam_mem_is_secure_buf(
-				io_cfg[i].mem_handle[j]) ? sec_mmu_hdl :
-				iommu_hdl;
 			rc = cam_mem_get_io_buf(io_cfg[i].mem_handle[j],
-				mmu_hdl, &iova_addr, &src_buf_size);
+				iommu_hdl, &iova_addr, &src_buf_size);
 			if (rc < 0) {
 				CAM_ERR(CAM_UTIL, "get src buf address fail");
 				continue;
@@ -4200,8 +4195,7 @@ static int cam_icp_mgr_prepare_hw_update(void *hw_mgr_priv,
 	CAM_DBG(CAM_REQ, "req id = %lld for ctx = %u",
 		packet->header.request_id, ctx_data->ctx_id);
 	/* Update Buffer Address from handles and patch information */
-	rc = cam_packet_util_process_patches(packet, hw_mgr->iommu_hdl,
-		hw_mgr->iommu_sec_hdl, 0);
+	rc = cam_packet_util_process_patches(packet, hw_mgr->iommu_hdl, 0);
 	if (rc) {
 		mutex_unlock(&ctx_data->ctx_mutex);
 		return rc;
@@ -5447,14 +5441,12 @@ static int cam_icp_mgr_cmd(void *hw_mgr_priv, void *cmd_args)
 		cam_icp_mgr_print_io_bufs(
 			hw_cmd_args->u.pf_args.pf_data.packet,
 			hw_mgr->iommu_hdl,
-			hw_mgr->iommu_sec_hdl,
 			hw_cmd_args->u.pf_args.buf_info,
 			hw_cmd_args->u.pf_args.mem_found);
 
 		cam_packet_util_process_patches(
 			hw_cmd_args->u.pf_args.pf_data.packet,
 			hw_mgr->iommu_hdl,
-			hw_mgr->iommu_sec_hdl,
 			1);
 
 		cam_icp_util_dump_frame_data(

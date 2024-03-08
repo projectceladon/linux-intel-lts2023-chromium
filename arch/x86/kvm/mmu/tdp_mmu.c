@@ -425,6 +425,7 @@ static void handle_changed_spte(struct kvm *kvm, int as_id, gfn_t gfn,
 	bool was_leaf = was_present && is_last_spte(old_spte, level);
 	bool is_leaf = is_present && is_last_spte(new_spte, level);
 	bool pfn_changed = spte_to_pfn(old_spte) != spte_to_pfn(new_spte);
+	bool is_refcounted = is_refcounted_page_spte(old_spte);
 
 	WARN_ON_ONCE(level > PT64_ROOT_MAX_LEVEL);
 	WARN_ON_ONCE(level < PG_LEVEL_4K);
@@ -489,9 +490,9 @@ static void handle_changed_spte(struct kvm *kvm, int as_id, gfn_t gfn,
 	if (is_leaf != was_leaf)
 		kvm_update_page_stats(kvm, level, is_leaf ? 1 : -1);
 
-	if (was_leaf && is_dirty_spte(old_spte) &&
+	if (was_leaf && is_dirty_spte(old_spte) && is_refcounted &&
 	    (!is_present || !is_dirty_spte(new_spte) || pfn_changed))
-		kvm_set_pfn_dirty(spte_to_pfn(old_spte));
+		kvm_set_page_dirty(pfn_to_page(spte_to_pfn(old_spte)));
 
 	/*
 	 * Recursively handle child PTs if the change removed a subtree from
@@ -503,9 +504,9 @@ static void handle_changed_spte(struct kvm *kvm, int as_id, gfn_t gfn,
 	    (is_leaf || !is_present || WARN_ON_ONCE(pfn_changed)))
 		handle_removed_pt(kvm, spte_to_child_pt(old_spte, level), shared);
 
-	if (was_leaf && is_accessed_spte(old_spte) &&
+	if (was_leaf && is_accessed_spte(old_spte) && is_refcounted &&
 	    (!is_present || !is_accessed_spte(new_spte) || pfn_changed))
-		kvm_set_pfn_accessed(spte_to_pfn(old_spte));
+		kvm_set_page_accessed(pfn_to_page(spte_to_pfn(old_spte)));
 }
 
 /*
@@ -965,8 +966,9 @@ static int tdp_mmu_map_handle_target_level(struct kvm_vcpu *vcpu,
 		new_spte = make_mmio_spte(vcpu, iter->gfn, ACC_ALL);
 	else
 		wrprot = make_spte(vcpu, sp, fault->slot, ACC_ALL, iter->gfn,
-					 fault->pfn, iter->old_spte, fault->prefetch, true,
-					 fault->map_writable, &new_spte);
+				   fault->pfn, iter->old_spte, fault->prefetch, true,
+				   fault->map_writable, !!fault->accessed_page,
+				   &new_spte);
 
 	if (new_spte == iter->old_spte)
 		ret = RET_PF_SPURIOUS;
@@ -1187,8 +1189,9 @@ static bool age_gfn_range(struct kvm *kvm, struct tdp_iter *iter,
 		 * Capture the dirty status of the page, so that it doesn't get
 		 * lost when the SPTE is marked for access tracking.
 		 */
-		if (is_writable_pte(iter->old_spte))
-			kvm_set_pfn_dirty(spte_to_pfn(iter->old_spte));
+		if (is_writable_pte(iter->old_spte) &&
+		    is_refcounted_page_spte(iter->old_spte))
+			kvm_set_page_dirty(pfn_to_page(spte_to_pfn(iter->old_spte)));
 
 		new_spte = mark_spte_for_access_track(iter->old_spte);
 		iter->old_spte = kvm_tdp_mmu_write_spte(iter->sptep,
@@ -1215,47 +1218,6 @@ static bool test_age_gfn(struct kvm *kvm, struct tdp_iter *iter,
 bool kvm_tdp_mmu_test_age_gfn(struct kvm *kvm, struct kvm_gfn_range *range)
 {
 	return kvm_tdp_mmu_handle_gfn(kvm, range, test_age_gfn);
-}
-
-bool kvm_arch_test_clear_young(struct kvm *kvm, struct kvm_gfn_range *range,
-			       gfn_t lsb_gfn, unsigned long *bitmap)
-{
-	struct kvm_mmu_page *root;
-
-	if (WARN_ON_ONCE(!kvm_arch_has_test_clear_young()))
-		return false;
-
-	if (kvm_memslots_have_rmaps(kvm))
-		return false;
-
-	/* see the comments on kvm_arch->tdp_mmu_roots */
-	rcu_read_lock();
-
-	list_for_each_entry_rcu(root, &kvm->arch.tdp_mmu_roots, link) {
-		struct tdp_iter iter;
-
-		if (kvm_mmu_page_as_id(root) != range->slot->as_id)
-			continue;
-
-		tdp_root_for_each_leaf_pte(iter, root, range->start, range->end) {
-			u64 *sptep = rcu_dereference(iter.sptep);
-			u64 new_spte = iter.old_spte & ~shadow_accessed_mask;
-
-			VM_WARN_ON_ONCE(!page_count(virt_to_page(sptep)));
-			VM_WARN_ON_ONCE(iter.gfn < range->start || iter.gfn >= range->end);
-
-			if (new_spte == iter.old_spte)
-				continue;
-
-			/* see the comments on the generic kvm_arch_has_test_clear_young() */
-			if (__test_and_change_bit(lsb_gfn - iter.gfn, bitmap))
-				cmpxchg64(sptep, iter.old_spte, new_spte);
-		}
-	}
-
-	rcu_read_unlock();
-
-	return true;
 }
 
 static bool set_spte_gfn(struct kvm *kvm, struct tdp_iter *iter,
@@ -1651,7 +1613,8 @@ static void clear_dirty_pt_masked(struct kvm *kvm, struct kvm_mmu_page *root,
 		trace_kvm_tdp_mmu_spte_changed(iter.as_id, iter.gfn, iter.level,
 					       iter.old_spte,
 					       iter.old_spte & ~dbit);
-		kvm_set_pfn_dirty(spte_to_pfn(iter.old_spte));
+		if (is_refcounted_page_spte(iter.old_spte))
+			kvm_set_page_dirty(pfn_to_page(spte_to_pfn(iter.old_spte)));
 	}
 
 	rcu_read_unlock();

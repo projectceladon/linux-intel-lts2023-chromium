@@ -25,6 +25,8 @@
 #define MT792x_FW_TAG_FEATURE	4
 #define MT792x_FW_CAP_CNM	BIT(7)
 
+#define MT792x_CHIP_CAP_CLC_EVT_EN BIT(0)
+
 /* NOTE: used to map mt76_rates. idx may change if firmware expands table */
 #define MT792x_BASIC_RATES_TBL	11
 
@@ -59,6 +61,14 @@ enum {
 	MT792x_CLC_POWER,
 	MT792x_CLC_CHAN,
 	MT792x_CLC_MAX_NUM,
+};
+
+enum mt792x_reg_power_type {
+	MT_AP_UNSET = 0,
+	MT_AP_DEFAULT,
+	MT_AP_LPI,
+	MT_AP_SP,
+	MT_AP_VLP,
 };
 
 DECLARE_EWMA(avg_signal, 10, 8)
@@ -112,6 +122,8 @@ struct mt792x_phy {
 	struct mt76_mib_stats mib;
 
 	u8 sta_work_count;
+	u8 clc_chan_conf;
+	enum mt792x_reg_power_type power_type;
 
 	struct sk_buff_head scan_event_list;
 	struct delayed_work scan_work;
@@ -119,6 +131,7 @@ struct mt792x_phy {
 	void *acpisar;
 #endif
 	void *clc[MT792x_CLC_MAX_NUM];
+	u64 chip_cap;
 
 	struct work_struct roc_work;
 	struct timer_list roc_timer;
@@ -168,6 +181,8 @@ struct mt792x_dev {
 	bool hw_init_done:1;
 	bool fw_assert:1;
 	bool has_eht:1;
+	bool regd_in_progress:1;
+	wait_queue_head_t wait;
 
 	struct work_struct init_work;
 
@@ -345,6 +360,7 @@ int mt792xe_mcu_fw_pmctrl(struct mt792x_dev *dev);
 int mt792x_init_acpi_sar(struct mt792x_dev *dev);
 int mt792x_init_acpi_sar_power(struct mt792x_phy *phy, bool set_default);
 u8 mt792x_acpi_get_flags(struct mt792x_phy *phy);
+u8 mt792x_acpi_get_mtcl_conf(struct mt792x_phy *phy, char *alpha2);
 #else
 static inline int mt792x_init_acpi_sar(struct mt792x_dev *dev)
 {
@@ -360,6 +376,11 @@ static inline int mt792x_init_acpi_sar_power(struct mt792x_phy *phy,
 static inline u8 mt792x_acpi_get_flags(struct mt792x_phy *phy)
 {
 	return 0;
+}
+
+static inline u8 mt792x_acpi_get_mtcl_conf(struct mt792x_phy *phy, char *alpha2)
+{
+	return 0xf;
 }
 #endif
 

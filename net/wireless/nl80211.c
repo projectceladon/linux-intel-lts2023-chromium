@@ -4012,6 +4012,7 @@ static int nl80211_dump_interface(struct sk_buff *skb, struct netlink_callback *
 			if_idx++;
 		}
 
+		if_start = 0;
 		wp_idx++;
 	}
  out:
@@ -4187,6 +4188,8 @@ static int nl80211_set_interface(struct sk_buff *skb, struct genl_info *info)
 		struct wireless_dev *wdev = dev->ieee80211_ptr;
 
 		if (ntype != NL80211_IFTYPE_MESH_POINT)
+			return -EINVAL;
+		if (otype != NL80211_IFTYPE_MESH_POINT)
 			return -EINVAL;
 		if (netif_running(dev))
 			return -EBUSY;
@@ -10994,8 +10997,9 @@ static int nl80211_associate(struct sk_buff *skb, struct genl_info *info)
 
 		if (cfg80211_find_ext_elem(WLAN_EID_EXT_NON_INHERITANCE,
 					   req.ie, req.ie_len)) {
-			GENL_SET_ERR_MSG(info,
-					 "non-inheritance makes no sense");
+			NL_SET_ERR_MSG_ATTR(info->extack,
+					    info->attrs[NL80211_ATTR_IE],
+					    "non-inheritance makes no sense");
 			return -EINVAL;
 		}
 	}
@@ -11120,6 +11124,7 @@ static int nl80211_associate(struct sk_buff *skb, struct genl_info *info)
 
 			if (!attrs[NL80211_ATTR_MLO_LINK_ID]) {
 				err = -EINVAL;
+				NL_SET_BAD_ATTR(info->extack, link);
 				goto free;
 			}
 
@@ -11127,6 +11132,7 @@ static int nl80211_associate(struct sk_buff *skb, struct genl_info *info)
 			/* cannot use the same link ID again */
 			if (req.links[link_id].bss) {
 				err = -EINVAL;
+				NL_SET_BAD_ATTR(info->extack, link);
 				goto free;
 			}
 			req.links[link_id].bss =
@@ -11134,6 +11140,8 @@ static int nl80211_associate(struct sk_buff *skb, struct genl_info *info)
 			if (IS_ERR(req.links[link_id].bss)) {
 				err = PTR_ERR(req.links[link_id].bss);
 				req.links[link_id].bss = NULL;
+				NL_SET_ERR_MSG_ATTR(info->extack,
+						    link, "Error fetching BSS for link");
 				goto free;
 			}
 
@@ -11146,8 +11154,9 @@ static int nl80211_associate(struct sk_buff *skb, struct genl_info *info)
 				if (cfg80211_find_elem(WLAN_EID_FRAGMENT,
 						       req.links[link_id].elems,
 						       req.links[link_id].elems_len)) {
-					GENL_SET_ERR_MSG(info,
-							 "cannot deal with fragmentation");
+					NL_SET_ERR_MSG_ATTR(info->extack,
+							    attrs[NL80211_ATTR_IE],
+							    "cannot deal with fragmentation");
 					err = -EINVAL;
 					goto free;
 				}
@@ -11155,8 +11164,9 @@ static int nl80211_associate(struct sk_buff *skb, struct genl_info *info)
 				if (cfg80211_find_ext_elem(WLAN_EID_EXT_NON_INHERITANCE,
 							   req.links[link_id].elems,
 							   req.links[link_id].elems_len)) {
-					GENL_SET_ERR_MSG(info,
-							 "cannot deal with non-inheritance");
+					NL_SET_ERR_MSG_ATTR(info->extack,
+							    attrs[NL80211_ATTR_IE],
+							    "cannot deal with non-inheritance");
 					err = -EINVAL;
 					goto free;
 				}
@@ -11199,6 +11209,9 @@ static int nl80211_associate(struct sk_buff *skb, struct genl_info *info)
 
 	err = nl80211_crypto_settings(rdev, info, &req.crypto, 1);
 	if (!err) {
+		struct nlattr *link;
+		int rem = 0;
+
 		wdev_lock(dev->ieee80211_ptr);
 
 		err = cfg80211_mlme_assoc(rdev, dev, &req);
@@ -11211,6 +11224,34 @@ static int nl80211_associate(struct sk_buff *skb, struct genl_info *info)
 		}
 
 		wdev_unlock(dev->ieee80211_ptr);
+
+		/* Report error from first problematic link */
+		if (info->attrs[NL80211_ATTR_MLO_LINKS]) {
+			nla_for_each_nested(link,
+					    info->attrs[NL80211_ATTR_MLO_LINKS],
+					    rem) {
+				struct nlattr *link_id_attr =
+					nla_find_nested(link, NL80211_ATTR_MLO_LINK_ID);
+
+				if (!link_id_attr)
+					continue;
+
+				link_id = nla_get_u8(link_id_attr);
+
+				if (link_id == req.link_id)
+					continue;
+
+				if (!req.links[link_id].error ||
+				    WARN_ON(req.links[link_id].error > 0))
+					continue;
+
+				WARN_ON(err >= 0);
+
+				NL_SET_BAD_ATTR(info->extack, link);
+				err = req.links[link_id].error;
+				break;
+			}
+		}
 	}
 
 free:
@@ -12906,17 +12947,23 @@ static int nl80211_set_cqm_rssi(struct genl_info *info,
 					lockdep_is_held(&wdev->mtx));
 
 	/* if already disabled just succeed */
-	if (!n_thresholds && !old)
-		return 0;
+	if (!n_thresholds && !old) {
+		err = 0;
+		goto unlock;
+	}
 
 	if (n_thresholds > 1) {
 		if (!wiphy_ext_feature_isset(&rdev->wiphy,
 					     NL80211_EXT_FEATURE_CQM_RSSI_LIST) ||
-		    !rdev->ops->set_cqm_rssi_range_config)
-			return -EOPNOTSUPP;
+		    !rdev->ops->set_cqm_rssi_range_config) {
+			err = -EOPNOTSUPP;
+			goto unlock;
+		}
 	} else {
-		if (!rdev->ops->set_cqm_rssi_config)
-			return -EOPNOTSUPP;
+		if (!rdev->ops->set_cqm_rssi_config) {
+			err = -EOPNOTSUPP;
+			goto unlock;
+		}
 	}
 
 	if (n_thresholds) {
