@@ -229,6 +229,7 @@ void btintel_secure_send_result(struct hci_dev *hdev,
 int btintel_set_quality_report(struct hci_dev *hdev, bool enable);
 bool btintel_is_quality_report_evt(struct sk_buff *skb);
 bool btintel_pull_quality_report_data(struct sk_buff *skb);
+u8 btintel_classify_pkt_type(struct hci_dev *hdev, struct sk_buff *skb);
 #else
 
 static inline int btintel_check_bdaddr(struct hci_dev *hdev)
@@ -334,5 +335,10 @@ static inline bool btintel_is_quality_report_evt(struct sk_buff *skb)
 static inline bool btintel_pull_quality_report_data(struct sk_buff *skb)
 {
 	return false;
+}
+
+static inline u8 btintel_classify_pkt_type(struct hci_dev *hdev, struct sk_buff *skb)
+{
+	return hci_skb_pkt_type(skb);
 }
 #endif
