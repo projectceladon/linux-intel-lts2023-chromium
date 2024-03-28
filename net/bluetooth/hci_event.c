@@ -36,8 +36,6 @@
 #include "hci_request.h"
 #include "hci_debugfs.h"
 #include "hci_codec.h"
-#include "a2mp.h"
-#include "amp.h"
 #include "aosp.h"
 #include "smp.h"
 #include "msft.h"
@@ -3576,8 +3574,6 @@ static void hci_remote_name_evt(struct hci_dev *hdev, void *data,
 	struct hci_conn *conn;
 
 	bt_dev_dbg(hdev, "status 0x%2.2x", ev->status);
-
-	hci_conn_check_pending(hdev);
 
 	hci_dev_lock(hdev);
 
