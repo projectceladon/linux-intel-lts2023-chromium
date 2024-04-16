@@ -350,6 +350,14 @@ enum {
 	 * it would reset itself. This shouldn't be upstreamed.
 	 */
 	HCI_QUIRK_FORCE_REMOTE_WAKE,
+
+	/*
+	 * When this quirk is set, the HCI_OP_READ_ENC_KEY_SIZE command is
+	 * skipped during an HCI_EV_ENCRYPT_CHANGE event. This is required
+	 * for Actions Semiconductor ATS2851 based controllers, which erroneously
+	 * claim to support it.
+	 */
+	HCI_QUIRK_BROKEN_READ_ENC_KEY_SIZE,
 };
 
 /* HCI device flags */
