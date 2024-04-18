@@ -441,7 +441,7 @@ int btintel_read_version(struct hci_dev *hdev, struct intel_version *ver)
 		return PTR_ERR(skb);
 	}
 
-	if (skb->len != sizeof(*ver)) {
+	if (!skb || skb->len != sizeof(*ver)) {
 		bt_dev_err(hdev, "Intel version event size mismatch");
 		kfree_skb(skb);
 		return -EILSEQ;
@@ -2819,6 +2819,12 @@ static int btintel_setup_combined(struct hci_dev *hdev)
 			err = btintel_legacy_rom_setup(hdev, &ver);
 			break;
 		case 0x0b:      /* SfP */
+			/* Apply the device specific controller quirk
+			 *
+			 * Use packet size 24 for the chip
+			 */
+			hdev->wbs_pkt_len = 24;
+			fallthrough;
 		case 0x11:      /* JfP */
 		case 0x12:      /* ThP */
 		case 0x13:      /* HrP */
