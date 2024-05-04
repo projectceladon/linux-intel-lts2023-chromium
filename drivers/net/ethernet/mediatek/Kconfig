@@ -14,6 +14,7 @@ config NET_MEDIATEK_SOC_WED
 config NET_MEDIATEK_SOC
 	tristate "MediaTek SoC Gigabit Ethernet support"
 	depends on NET_DSA || !NET_DSA
+	depends on BROKEN
 	select PINCTRL
 	select PHYLINK
 	select DIMLIB
