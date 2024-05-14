@@ -3353,10 +3353,6 @@ static int clk_summary_show(struct seq_file *s, void *data)
 	if (ret)
 		return ret;
 
-	ret = clk_pm_runtime_get_all();
-	if (ret)
-		return ret;
-
 	clk_prepare_lock();
 
 	for (; *lists; lists++)
