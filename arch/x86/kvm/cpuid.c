@@ -362,6 +362,7 @@ static void kvm_vcpu_after_set_cpuid(struct kvm_vcpu *vcpu)
 
 	kvm_update_pv_runtime(vcpu);
 
+	vcpu->arch.is_amd_compatible = guest_cpuid_is_amd_or_hygon(vcpu);
 	vcpu->arch.maxphyaddr = cpuid_query_maxphyaddr(vcpu);
 	vcpu->arch.reserved_gpa_bits = kvm_vcpu_reserved_gpa_bits_raw(vcpu);
 
@@ -1163,6 +1164,8 @@ static inline int __do_cpuid_func(struct kvm_cpuid_array *array, u32 function)
 			     (1 << KVM_FEATURE_POLL_CONTROL) |
 			     (1 << KVM_FEATURE_PV_SCHED_YIELD) |
 			     (1 << KVM_FEATURE_ASYNC_PF_INT);
+		if (IS_ENABLED(CONFIG_PARAVIRT_SCHED_KVM))
+			entry->eax |= (1 << KVM_FEATURE_PV_SCHED);
 
 #ifdef CONFIG_KVM_VIRT_SUSPEND_TIMING
 		entry->eax |= (1 << KVM_FEATURE_HOST_SUSPEND_TIME);

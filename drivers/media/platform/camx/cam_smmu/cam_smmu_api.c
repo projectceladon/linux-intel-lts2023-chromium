@@ -21,7 +21,6 @@
 #include <linux/iommu.h>
 #include <linux/slab.h>
 #include <linux/dma-mapping.h>
-#include <linux/workqueue.h>
 #include <linux/genalloc.h>
 #include <linux/platform_device.h>
 #include <linux/scatterlist.h>
@@ -54,16 +53,6 @@ struct firmware_alloc_info {
 };
 
 static struct firmware_alloc_info icp_fw;
-
-struct cam_smmu_work_payload {
-	int idx;
-	struct iommu_domain *domain;
-	struct device *dev;
-	unsigned long iova;
-	int flags;
-	void *token;
-	struct list_head list;
-};
 
 enum cam_iommu_type {
 	CAM_SMMU_INVALID,
@@ -114,6 +103,8 @@ struct cam_context_bank_info {
 	struct cam_smmu_region_info qdss_info;
 	struct secheap_buf_info secheap_buf;
 
+	/* Protects lists of buffers and handlers */
+	rwlock_t cb_info_lock;
 	struct list_head smmu_buf_list;
 	struct list_head smmu_buf_kernel_list;
 	struct mutex lock;
@@ -130,9 +121,6 @@ struct cam_iommu_cb_set {
 	struct cam_context_bank_info *cb_info;
 	u32 cb_num;
 	u32 cb_init_count;
-	struct work_struct smmu_work;
-	struct mutex payload_list_lock;
-	struct list_head payload_list;
 	u32 non_fatal_fault;
 };
 
@@ -173,12 +161,6 @@ static int cam_smmu_create_iommu_handle(int idx);
 static int cam_smmu_create_add_handle_in_table(char *name,
 	int *hdl);
 
-static struct cam_dma_buff_info *cam_smmu_find_mapping_by_ion_index(int idx,
-	struct dma_buf *dma_buf);
-
-static struct cam_dma_buff_info *cam_smmu_find_mapping_by_dma_buf(int idx,
-	struct dma_buf *buf);
-
 static int cam_smmu_map_buffer_and_add_to_list(int idx, int dma_fd,
 	enum dma_data_direction dma_dir, dma_addr_t *paddr_ptr,
 	size_t *len_ptr, enum cam_smmu_region_id region_id);
@@ -188,8 +170,7 @@ static int cam_smmu_map_kernel_buffer_and_add_to_list(int idx,
 	dma_addr_t *paddr_ptr, size_t *len_ptr,
 	enum cam_smmu_region_id region_id);
 
-static int cam_smmu_unmap_buf_and_remove_from_list(
-	struct cam_dma_buff_info *mapping_info, int idx);
+static void cam_smmu_unmap_buf(struct cam_dma_buff_info *mapping_info, int idx);
 
 static void cam_smmu_clean_user_buffer_list(int idx);
 
@@ -205,44 +186,21 @@ static int cam_smmu_probe(struct platform_device *pdev);
 
 static uint32_t cam_smmu_find_closest_mapping(int idx, void *vaddr);
 
-static void cam_smmu_page_fault_work(struct work_struct *work)
+#define cb_info_read_lock(i, f)		\
+	read_lock_irqsave(&iommu_cb_set.cb_info[(i)].cb_info_lock, (f))
+
+#define cb_info_read_unlock(i, f)	\
+	read_unlock_irqrestore(&iommu_cb_set.cb_info[(i)].cb_info_lock, (f))
+
+#define cb_info_write_lock(i, f)	\
+	write_lock_irqsave(&iommu_cb_set.cb_info[(i)].cb_info_lock, (f))
+
+#define cb_info_write_unlock(i, f)	\
+	write_unlock_irqrestore(&iommu_cb_set.cb_info[(i)].cb_info_lock, (f))
+
+static void cb_info_assert_held_write(int idx)
 {
-	int j;
-	int idx;
-	struct cam_smmu_work_payload *payload;
-	uint32_t buf_info;
-
-	mutex_lock(&iommu_cb_set.payload_list_lock);
-	if (list_empty(&iommu_cb_set.payload_list)) {
-		CAM_ERR(CAM_SMMU, "Payload list empty");
-		mutex_unlock(&iommu_cb_set.payload_list_lock);
-		return;
-	}
-
-	payload = list_first_entry(&iommu_cb_set.payload_list,
-		struct cam_smmu_work_payload,
-		list);
-	list_del(&payload->list);
-	mutex_unlock(&iommu_cb_set.payload_list_lock);
-
-	/* Dereference the payload to call the handler */
-	idx = payload->idx;
-	buf_info = cam_smmu_find_closest_mapping(idx, (void *)payload->iova);
-	if (buf_info != 0)
-		CAM_INFO(CAM_SMMU, "closest buf 0x%x idx %d", buf_info, idx);
-
-	for (j = 0; j < CAM_SMMU_CB_MAX; j++) {
-		if ((iommu_cb_set.cb_info[idx].handler[j])) {
-			iommu_cb_set.cb_info[idx].handler[j](
-				payload->domain,
-				payload->dev,
-				payload->iova,
-				payload->flags,
-				iommu_cb_set.cb_info[idx].token[j],
-				buf_info);
-		}
-	}
-	kfree(payload);
+	lockdep_assert_held_write(&iommu_cb_set.cb_info[idx].cb_info_lock);
 }
 
 static int cam_smmu_create_debugfs_entry(void)
@@ -262,31 +220,44 @@ static int cam_smmu_create_debugfs_entry(void)
 static void cam_smmu_print_user_list(int idx)
 {
 	struct cam_dma_buff_info *mapping;
+	unsigned long flags;
 
-	CAM_ERR(CAM_SMMU, "index = %d", idx);
+	cb_info_read_lock(idx, flags);
+	if (!list_empty(&iommu_cb_set.cb_info[idx].smmu_buf_list))
+		CAM_ERR(CAM_SMMU, "UMD %s buffer list is not clean",
+			iommu_cb_set.cb_info[idx].name);
+
 	list_for_each_entry(mapping,
 		&iommu_cb_set.cb_info[idx].smmu_buf_list, list) {
 		CAM_ERR(CAM_SMMU,
-			"dma_fd = %d, i_ino=%lu, paddr= 0x%pK, len = %u, region = %d",
-			 mapping->dma_fd, mapping->i_ino, (void *)mapping->paddr,
-			 (unsigned int)mapping->len,
-			 mapping->region_id);
+			"index = %d, dma_fd = %d, i_ino=%lu, paddr= 0x%pK, len = %u, region = %d",
+			idx, mapping->dma_fd, mapping->i_ino,
+			(void *)mapping->paddr, (unsigned int)mapping->len,
+			mapping->region_id);
 	}
+	cb_info_read_unlock(idx, flags);
 }
 
 static void cam_smmu_print_kernel_list(int idx)
 {
 	struct cam_dma_buff_info *mapping;
+	unsigned long flags;
 
-	CAM_ERR(CAM_SMMU, "index = %d", idx);
+	cb_info_read_lock(idx, flags);
+	if (!list_empty(&iommu_cb_set.cb_info[idx].smmu_buf_kernel_list))
+		CAM_ERR(CAM_SMMU, "KMD %s buffer list is not clean",
+			iommu_cb_set.cb_info[idx].name);
+
 	list_for_each_entry(mapping,
 		&iommu_cb_set.cb_info[idx].smmu_buf_kernel_list, list) {
 		CAM_ERR(CAM_SMMU,
-			"dma_buf = %pK, i_ino = %lu, paddr= 0x%pK, len = %u, region = %d",
-			 mapping->buf, mapping->i_ino, (void *)mapping->paddr,
-			 (unsigned int)mapping->len,
-			 mapping->region_id);
+			"index = %d, dma_buf = %pK, i_ino = %lu, paddr= 0x%pK, len = %u, region = %d",
+			idx, mapping->buf, mapping->i_ino,
+			(void *)mapping->paddr, (unsigned int)mapping->len,
+			mapping->region_id);
 	}
+
+	cb_info_read_unlock(idx, flags);
 }
 
 static void cam_smmu_print_table(void)
@@ -362,6 +333,7 @@ end:
 void cam_smmu_set_client_page_fault_handler(int handle,
 	cam_smmu_client_page_fault_handler handler_cb, void *token)
 {
+	unsigned long flags;
 	int idx, i = 0;
 
 	if (!token || (handle == HANDLE_INIT)) {
@@ -397,6 +369,7 @@ void cam_smmu_set_client_page_fault_handler(int handle,
 
 		iommu_cb_set.cb_info[idx].cb_count++;
 
+		cb_info_write_lock(idx, flags);
 		for (i = 0; i < iommu_cb_set.cb_info[idx].cb_count; i++) {
 			if (iommu_cb_set.cb_info[idx].token[i] == NULL) {
 				iommu_cb_set.cb_info[idx].token[i] = token;
@@ -405,7 +378,9 @@ void cam_smmu_set_client_page_fault_handler(int handle,
 				break;
 			}
 		}
+		cb_info_write_unlock(idx, flags);
 	} else {
+		cb_info_write_lock(idx, flags);
 		for (i = 0; i < CAM_SMMU_CB_MAX; i++) {
 			if (iommu_cb_set.cb_info[idx].token[i] == token) {
 				iommu_cb_set.cb_info[idx].token[i] = NULL;
@@ -415,6 +390,7 @@ void cam_smmu_set_client_page_fault_handler(int handle,
 				break;
 			}
 		}
+		cb_info_write_unlock(idx, flags);
 		if (i == CAM_SMMU_CB_MAX)
 			CAM_ERR(CAM_SMMU,
 				"Error: hdl %x no matching tokens: %s",
@@ -425,6 +401,7 @@ void cam_smmu_set_client_page_fault_handler(int handle,
 
 void cam_smmu_unset_client_page_fault_handler(int handle, void *token)
 {
+	unsigned long flags;
 	int idx, i = 0;
 
 	if (!token || (handle == HANDLE_INIT)) {
@@ -449,6 +426,7 @@ void cam_smmu_unset_client_page_fault_handler(int handle, void *token)
 		return;
 	}
 
+	cb_info_write_lock(idx, flags);
 	for (i = 0; i < CAM_SMMU_CB_MAX; i++) {
 		if (iommu_cb_set.cb_info[idx].token[i] == token) {
 			iommu_cb_set.cb_info[idx].token[i] = NULL;
@@ -458,6 +436,7 @@ void cam_smmu_unset_client_page_fault_handler(int handle, void *token)
 			break;
 		}
 	}
+	cb_info_write_unlock(idx, flags);
 	if (i == CAM_SMMU_CB_MAX)
 		CAM_ERR(CAM_SMMU, "Error: hdl %x no matching tokens: %s",
 			handle, iommu_cb_set.cb_info[idx].name);
@@ -468,9 +447,10 @@ static int cam_smmu_iommu_fault_handler(struct iommu_domain *domain,
 	struct device *dev, unsigned long iova,
 	int flags, void *token)
 {
+	unsigned long irq_flags;
+	uint32_t buf_info;
 	char *cb_name;
-	int idx;
-	struct cam_smmu_work_payload *payload;
+	int idx, j;
 
 	if (!token) {
 		CAM_ERR(CAM_SMMU, "Error: token is NULL");
@@ -501,24 +481,25 @@ static int cam_smmu_iommu_fault_handler(struct iommu_domain *domain,
 		return -EINVAL;
 	}
 
-	payload = kzalloc(sizeof(struct cam_smmu_work_payload), GFP_KERNEL);
-	if (!payload)
-		return -EINVAL;
+	cb_info_read_lock(idx, irq_flags);
+	buf_info = cam_smmu_find_closest_mapping(idx, (void *)iova);
+	if (buf_info != 0)
+		CAM_INFO(CAM_SMMU, "closest buf 0x%x idx %d", buf_info, idx);
 
-	payload->domain = domain;
-	payload->dev = dev;
-	payload->iova = iova;
-	payload->flags = flags;
-	payload->token = token;
-	payload->idx = idx;
+	for (j = 0; j < CAM_SMMU_CB_MAX; j++) {
+		if ((iommu_cb_set.cb_info[idx].handler[j])) {
+			iommu_cb_set.cb_info[idx].handler[j](
+				domain,
+				dev,
+				iova,
+				flags,
+				iommu_cb_set.cb_info[idx].token[j],
+				buf_info);
+		}
+	}
+	cb_info_read_unlock(idx, irq_flags);
 
-	mutex_lock(&iommu_cb_set.payload_list_lock);
-	list_add_tail(&payload->list, &iommu_cb_set.payload_list);
-	mutex_unlock(&iommu_cb_set.payload_list_lock);
-
-	cam_smmu_page_fault_work(&iommu_cb_set.smmu_work);
-
-	return -EINVAL;
+	return 0;
 }
 
 static void cam_smmu_reset_iommu_table(enum cam_smmu_init_dir ops)
@@ -530,6 +511,7 @@ static void cam_smmu_reset_iommu_table(enum cam_smmu_init_dir ops)
 		iommu_cb_set.cb_info[i].handle = HANDLE_INIT;
 		INIT_LIST_HEAD(&iommu_cb_set.cb_info[i].smmu_buf_list);
 		INIT_LIST_HEAD(&iommu_cb_set.cb_info[i].smmu_buf_kernel_list);
+		rwlock_init(&iommu_cb_set.cb_info[i].cb_info_lock);
 		iommu_cb_set.cb_info[i].state = CAM_SMMU_DETACH;
 		iommu_cb_set.cb_info[i].dev = NULL;
 		iommu_cb_set.cb_info[i].cb_count = 0;
@@ -634,14 +616,15 @@ static int cam_smmu_create_add_handle_in_table(char *name,
 	return -EINVAL;
 }
 
-static struct cam_dma_buff_info *cam_smmu_find_mapping_by_ion_index(int idx,
+static struct cam_dma_buff_info *__cam_smmu_find_mapping_by_ino_index(int idx,
 	struct dma_buf *dmabuf)
 {
 	struct cam_dma_buff_info *mapping;
 	unsigned long i_ino;
 
-	i_ino = file_inode(dmabuf->file)->i_ino;
+	cb_info_assert_held_write(idx);
 
+	i_ino = file_inode(dmabuf->file)->i_ino;
 	list_for_each_entry(mapping,
 			&iommu_cb_set.cb_info[idx].smmu_buf_list,
 			list) {
@@ -658,7 +641,7 @@ static struct cam_dma_buff_info *cam_smmu_find_mapping_by_ion_index(int idx,
 	return NULL;
 }
 
-static struct cam_dma_buff_info *cam_smmu_find_mapping_by_dma_buf(int idx,
+static struct cam_dma_buff_info *__cam_smmu_find_mapping_by_dma_buf(int idx,
 	struct dma_buf *buf)
 {
 	struct cam_dma_buff_info *mapping;
@@ -667,6 +650,8 @@ static struct cam_dma_buff_info *cam_smmu_find_mapping_by_dma_buf(int idx,
 		CAM_ERR(CAM_SMMU, "Invalid dma_buf");
 		return NULL;
 	}
+
+	cb_info_assert_held_write(idx);
 
 	list_for_each_entry(mapping,
 			&iommu_cb_set.cb_info[idx].smmu_buf_kernel_list,
@@ -682,71 +667,41 @@ static struct cam_dma_buff_info *cam_smmu_find_mapping_by_dma_buf(int idx,
 	return NULL;
 }
 
-static void cam_smmu_clean_user_buffer_list(int idx)
+static void cam_clean_ssmu_buf_list(int idx, struct list_head *smmu_buf_list)
 {
-	int ret;
-	struct cam_dma_buff_info *mapping_info, *temp;
+	struct cam_dma_buff_info *mapping_info;
+	unsigned long flags;
 
-	list_for_each_entry_safe(mapping_info, temp,
-			&iommu_cb_set.cb_info[idx].smmu_buf_list, list) {
+	while (1) {
+		cb_info_write_lock(idx, flags);
+		mapping_info = list_first_entry_or_null(smmu_buf_list,
+							struct cam_dma_buff_info,
+							list);
+		if (mapping_info)
+			list_del_init(&mapping_info->list);
+		cb_info_write_unlock(idx, flags);
+
+		if (!mapping_info)
+			break;
+
 		CAM_DBG(CAM_SMMU, "Free mapping address %pK, i = %d, fd = %d, i_ino = %lu",
 			(void *)mapping_info->paddr, idx,
 			mapping_info->dma_fd,
 			mapping_info->i_ino);
 
-		/* Clean up regular mapped buffers */
-		ret = cam_smmu_unmap_buf_and_remove_from_list(
-				mapping_info,
-				idx);
-		if (ret < 0) {
-			CAM_ERR(CAM_SMMU, "Buffer delete failed: idx = %d",
-				idx);
-			CAM_ERR(CAM_SMMU,
-				"Buffer delete failed: addr = %lx, fd = %d, i_ino = %lu",
-				(unsigned long)mapping_info->paddr,
-				mapping_info->dma_fd,
-				mapping_info->i_ino);
-			/*
-			 * Ignore this error and continue to delete other
-			 * buffers in the list
-			 */
-			continue;
-		}
+		cam_smmu_unmap_buf(mapping_info, idx);
 	}
+}
+
+static void cam_smmu_clean_user_buffer_list(int idx)
+{
+	cam_clean_ssmu_buf_list(idx, &iommu_cb_set.cb_info[idx].smmu_buf_list);
 }
 
 static void cam_smmu_clean_kernel_buffer_list(int idx)
 {
-	int ret;
-	struct cam_dma_buff_info *mapping_info, *temp;
-
-	list_for_each_entry_safe(mapping_info, temp,
-			&iommu_cb_set.cb_info[idx].smmu_buf_kernel_list, list) {
-		CAM_DBG(CAM_SMMU,
-			"Free mapping address %pK, i = %d, dma_buf = %pK",
-			(void *)mapping_info->paddr, idx,
-			mapping_info->buf);
-
-		/* Clean up regular mapped buffers */
-		ret = cam_smmu_unmap_buf_and_remove_from_list(
-				mapping_info,
-				idx);
-
-		if (ret < 0) {
-			CAM_ERR(CAM_SMMU,
-				"Buffer delete in kernel list failed: idx = %d",
-				idx);
-			CAM_ERR(CAM_SMMU,
-				"Buffer delete failed: addr = %lx, dma_buf = %pK",
-				(unsigned long)mapping_info->paddr,
-				mapping_info->buf);
-			/*
-			 * Ignore this error and continue to delete other
-			 * buffers in the list
-			 */
-			continue;
-		}
-	}
+	cam_clean_ssmu_buf_list(idx,
+				&iommu_cb_set.cb_info[idx].smmu_buf_kernel_list);
 }
 
 static int cam_smmu_attach(int idx)
@@ -1478,6 +1433,7 @@ static int cam_smmu_map_buffer_and_add_to_list(int idx, int dma_fd,
 	int rc = -1;
 	struct cam_dma_buff_info *mapping_info = NULL;
 	struct dma_buf *buf = NULL;
+	unsigned long flags;
 
 	/* returns the dma_buf structure related to an fd */
 	buf = dma_buf_get(dma_fd);
@@ -1493,8 +1449,10 @@ static int cam_smmu_map_buffer_and_add_to_list(int idx, int dma_fd,
 	mapping_info->dma_fd = dma_fd;
 	mapping_info->i_ino = file_inode(buf->file)->i_ino;
 	/* add to the list */
+	cb_info_write_lock(idx, flags);
 	list_add(&mapping_info->list,
 		&iommu_cb_set.cb_info[idx].smmu_buf_list);
+	cb_info_write_unlock(idx, flags);
 
 	CAM_DBG(CAM_SMMU, "fd %d i_ino %lu dmabuf %pK", dma_fd, mapping_info->i_ino, buf);
 
@@ -1508,6 +1466,7 @@ static int cam_smmu_map_kernel_buffer_and_add_to_list(int idx,
 {
 	int rc = -1;
 	struct cam_dma_buff_info *mapping_info = NULL;
+	unsigned long flags;
 
 	rc = cam_smmu_map_buffer_validate(buf, idx, dma_dir, paddr_ptr, len_ptr,
 		region_id, &mapping_info);
@@ -1520,31 +1479,18 @@ static int cam_smmu_map_kernel_buffer_and_add_to_list(int idx,
 	mapping_info->dma_fd = -1;
 
 	/* add to the list */
+	cb_info_write_lock(idx, flags);
 	list_add(&mapping_info->list,
-		&iommu_cb_set.cb_info[idx].smmu_buf_kernel_list);
-
+		 &iommu_cb_set.cb_info[idx].smmu_buf_kernel_list);
+	cb_info_write_unlock(idx, flags);
 	return 0;
 }
 
-
-static int cam_smmu_unmap_buf_and_remove_from_list(
-	struct cam_dma_buff_info *mapping_info,
-	int idx)
+/* This function can schedule, should be called outside cb_info lock scope */
+static void cam_smmu_unmap_buf(struct cam_dma_buff_info *mapping_info, int idx)
 {
 	struct cam_context_bank_info *cb = &iommu_cb_set.cb_info[idx];
 	struct gen_pool *pool = NULL;
-
-	if ((!mapping_info->buf) || (!mapping_info->table) ||
-		(!mapping_info->attach)) {
-		CAM_ERR(CAM_SMMU,
-			"Error: Invalid params dev = %pK, table = %pK",
-			(void *)iommu_cb_set.cb_info[idx].dev,
-			(void *)mapping_info->table);
-		CAM_ERR(CAM_SMMU, "Error:dma_buf = %pK, attach = %pK",
-			(void *)mapping_info->buf,
-			(void *)mapping_info->attach);
-		return -EINVAL;
-	}
 
 	CAM_DBG(CAM_SMMU, "Removing SHARED buffer paddr = %pK, len = %zu",
 		(void *)mapping_info->paddr, mapping_info->len);
@@ -1561,31 +1507,29 @@ static int cam_smmu_unmap_buf_and_remove_from_list(
 	if (mapping_info->dma_fd)
 		dma_buf_put(mapping_info->buf);
 
-	mapping_info->buf = NULL;
-
-	list_del_init(&mapping_info->list);
-
 	/* free one buffer */
 	kfree(mapping_info);
-	return 0;
 }
 
 static enum cam_smmu_buf_state cam_smmu_check_fd_in_list(int idx,
 	struct dma_buf *dmabuf, dma_addr_t *paddr_ptr, size_t *len_ptr)
 {
 	struct cam_dma_buff_info *mapping;
-	unsigned long i_ino;
+	unsigned long i_ino, flags;
 
 	i_ino = file_inode(dmabuf->file)->i_ino;
 
+	cb_info_read_lock(idx, flags);
 	list_for_each_entry(mapping,
 		&iommu_cb_set.cb_info[idx].smmu_buf_list, list) {
 		if (mapping->i_ino == i_ino) {
 			*paddr_ptr = mapping->paddr;
 			*len_ptr = mapping->len;
+			cb_info_read_unlock(idx, flags);
 			return CAM_SMMU_BUFF_EXIST;
 		}
 	}
+	cb_info_read_unlock(idx, flags);
 
 	return CAM_SMMU_BUFF_NOT_EXIST;
 }
@@ -1594,15 +1538,19 @@ static enum cam_smmu_buf_state cam_smmu_check_dma_buf_in_list(int idx,
 	struct dma_buf *buf, dma_addr_t *paddr_ptr, size_t *len_ptr)
 {
 	struct cam_dma_buff_info *mapping;
+	unsigned long flags;
 
+	cb_info_read_lock(idx, flags);
 	list_for_each_entry(mapping,
 		&iommu_cb_set.cb_info[idx].smmu_buf_kernel_list, list) {
 		if (mapping->buf == buf) {
 			*paddr_ptr = mapping->paddr;
 			*len_ptr = mapping->len;
+			cb_info_read_unlock(idx, flags);
 			return CAM_SMMU_BUFF_EXIST;
 		}
 	}
+	cb_info_read_unlock(idx, flags);
 
 	return CAM_SMMU_BUFF_NOT_EXIST;
 }
@@ -1894,6 +1842,7 @@ int cam_smmu_unmap_user_iova(int handle,
 {
 	int idx, rc;
 	struct cam_dma_buff_info *mapping_info;
+	unsigned long flags;
 
 	rc = cam_smmu_unmap_validate_params(handle);
 	if (rc) {
@@ -1911,10 +1860,11 @@ int cam_smmu_unmap_user_iova(int handle,
 		goto unmap_end;
 	}
 
+	cb_info_write_lock(idx, flags);
 	/* Based on inode & index, we can find mapping info of buffer */
-	mapping_info = cam_smmu_find_mapping_by_ion_index(idx, dma_buf);
-
+	mapping_info = __cam_smmu_find_mapping_by_ino_index(idx, dma_buf);
 	if (!mapping_info) {
+		cb_info_write_unlock(idx, flags);
 		CAM_ERR(CAM_SMMU,
 			"Error: Invalid params idx = %d, fd = %d",
 			idx, dma_fd);
@@ -1922,11 +1872,12 @@ int cam_smmu_unmap_user_iova(int handle,
 		goto unmap_end;
 	}
 
+	list_del_init(&mapping_info->list);
+	cb_info_write_unlock(idx, flags);
+
 	/* Unmapping one buffer from device */
 	CAM_DBG(CAM_SMMU, "SMMU: removing buffer idx = %d", idx);
-	rc = cam_smmu_unmap_buf_and_remove_from_list(mapping_info, idx);
-	if (rc < 0)
-		CAM_ERR(CAM_SMMU, "Error: unmap or remove list fail");
+	cam_smmu_unmap_buf(mapping_info, idx);
 
 unmap_end:
 	mutex_unlock(&iommu_cb_set.cb_info[idx].lock);
@@ -1939,6 +1890,7 @@ int cam_smmu_unmap_kernel_iova(int handle,
 {
 	int idx, rc;
 	struct cam_dma_buff_info *mapping_info;
+	unsigned long flags;
 
 	rc = cam_smmu_unmap_validate_params(handle);
 	if (rc) {
@@ -1956,10 +1908,11 @@ int cam_smmu_unmap_kernel_iova(int handle,
 		goto unmap_end;
 	}
 
+	cb_info_write_lock(idx, flags);
 	/* Based on dma_buf & index, we can find mapping info of buffer */
-	mapping_info = cam_smmu_find_mapping_by_dma_buf(idx, buf);
-
+	mapping_info = __cam_smmu_find_mapping_by_dma_buf(idx, buf);
 	if (!mapping_info) {
+		cb_info_write_unlock(idx, flags);
 		CAM_ERR(CAM_SMMU,
 			"Error: Invalid params idx = %d, dma_buf = %pK",
 			idx, buf);
@@ -1967,62 +1920,18 @@ int cam_smmu_unmap_kernel_iova(int handle,
 		goto unmap_end;
 	}
 
+	list_del_init(&mapping_info->list);
+	cb_info_write_unlock(idx, flags);
+
 	/* Unmapping one buffer from device */
 	CAM_DBG(CAM_SMMU, "SMMU: removing buffer idx = %d", idx);
-	rc = cam_smmu_unmap_buf_and_remove_from_list(mapping_info, idx);
-	if (rc < 0)
-		CAM_ERR(CAM_SMMU, "Error: unmap or remove list fail");
+	cam_smmu_unmap_buf(mapping_info, idx);
 
 unmap_end:
 	mutex_unlock(&iommu_cb_set.cb_info[idx].lock);
 	return rc;
 }
 EXPORT_SYMBOL(cam_smmu_unmap_kernel_iova);
-
-
-int cam_smmu_put_iova(int handle, int dma_fd, struct dma_buf *dma_buf)
-{
-	int idx;
-	int rc = 0;
-	struct cam_dma_buff_info *mapping_info;
-
-	if (handle == HANDLE_INIT) {
-		CAM_ERR(CAM_SMMU, "Error: Invalid handle");
-		return -EINVAL;
-	}
-
-	/* find index in the iommu_cb_set.cb_info */
-	idx = GET_SMMU_TABLE_IDX(handle);
-	if (idx < 0 || idx >= iommu_cb_set.cb_num) {
-		CAM_ERR(CAM_SMMU,
-			"Error: handle or index invalid. idx = %d hdl = %x",
-			idx, handle);
-		return -EINVAL;
-	}
-
-	mutex_lock(&iommu_cb_set.cb_info[idx].lock);
-	if (iommu_cb_set.cb_info[idx].handle != handle) {
-		CAM_ERR(CAM_SMMU,
-			"Error: hdl is not valid, table_hdl = %x, hdl = %x",
-			iommu_cb_set.cb_info[idx].handle, handle);
-		rc = -EINVAL;
-		goto put_addr_end;
-	}
-
-	/* based on inode and index, we can find mapping info of buffer */
-	mapping_info = cam_smmu_find_mapping_by_ion_index(idx, dma_buf);
-	if (!mapping_info) {
-		CAM_ERR(CAM_SMMU, "Error: Invalid params idx = %d, fd = %d",
-			idx, dma_fd);
-		rc = -EINVAL;
-		goto put_addr_end;
-	}
-
-put_addr_end:
-	mutex_unlock(&iommu_cb_set.cb_info[idx].lock);
-	return rc;
-}
-EXPORT_SYMBOL(cam_smmu_put_iova);
 
 int cam_smmu_destroy_handle(int handle)
 {
@@ -2050,20 +1959,11 @@ int cam_smmu_destroy_handle(int handle)
 		return -EINVAL;
 	}
 
-	if (!list_empty_careful(&iommu_cb_set.cb_info[idx].smmu_buf_list)) {
-		CAM_ERR(CAM_SMMU, "UMD %s buffer list is not clean",
-			iommu_cb_set.cb_info[idx].name);
-		cam_smmu_print_user_list(idx);
-		cam_smmu_clean_user_buffer_list(idx);
-	}
+	cam_smmu_print_user_list(idx);
+	cam_smmu_clean_user_buffer_list(idx);
 
-	if (!list_empty_careful(
-		&iommu_cb_set.cb_info[idx].smmu_buf_kernel_list)) {
-		CAM_ERR(CAM_SMMU, "KMD %s buffer list is not clean",
-			iommu_cb_set.cb_info[idx].name);
-		cam_smmu_print_kernel_list(idx);
-		cam_smmu_clean_kernel_buffer_list(idx);
-	}
+	cam_smmu_print_kernel_list(idx);
+	cam_smmu_clean_kernel_buffer_list(idx);
 
 	iommu_cb_set.cb_info[idx].cb_count = 0;
 	iommu_cb_set.cb_info[idx].handle = HANDLE_INIT;
@@ -2468,12 +2368,8 @@ static int cam_smmu_probe(struct platform_device *pdev)
 	if (rc < 0) {
 		CAM_ERR(CAM_SMMU, "Error: populating devices");
 	} else {
-		INIT_WORK(&iommu_cb_set.smmu_work, cam_smmu_page_fault_work);
-		mutex_init(&iommu_cb_set.payload_list_lock);
-		INIT_LIST_HEAD(&iommu_cb_set.payload_list);
+		pr_info("%s driver probed successfully\n", KBUILD_MODNAME);
 	}
-
-	pr_info("%s driver probed successfully\n", KBUILD_MODNAME);
 
 	return rc;
 }
