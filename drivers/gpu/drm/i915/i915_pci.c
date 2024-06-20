@@ -713,7 +713,6 @@ static const struct intel_device_info adl_p_info = {
 	.has_3d_pipeline = 1, \
 	.has_64bit_reloc = 1, \
 	.has_flat_ccs = 1, \
-	.has_4tile = 1, \
 	.has_global_mocs = 1, \
 	.has_gt_uc = 1, \
 	.has_llc = 1, \
@@ -830,6 +829,7 @@ static const struct intel_device_info mtl_info = {
 	.has_flat_ccs = 0,
 	.has_gmd_id = 1,
 	.has_guc_deprivilege = 1,
+	.has_guc_tlb_invalidation = 1,
 	.has_llc = 0,
 	.has_mslice_steering = 0,
 	.has_snoop = 1,
@@ -1088,7 +1088,10 @@ static struct pci_driver i915_pci_driver = {
 	.probe = i915_pci_probe,
 	.remove = i915_pci_remove,
 	.shutdown = i915_pci_shutdown,
-	.driver.pm = &i915_pm_ops,
+	.driver = {
+		.pm = &i915_pm_ops,
+		.probe_type = PROBE_PREFER_ASYNCHRONOUS,
+	},
 };
 
 int i915_pci_register_driver(void)

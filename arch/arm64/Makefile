@@ -150,6 +150,10 @@ libs-$(CONFIG_EFI_STUB) += $(objtree)/drivers/firmware/efi/libstub/lib.a
 # Default target when executing plain make
 boot		:= arch/arm64/boot
 
+BOOT_TARGETS	:= Image vmlinuz.efi image.fit
+
+PHONY += $(BOOT_TARGETS)
+
 ifeq ($(CONFIG_EFI_ZBOOT),)
 KBUILD_IMAGE	:= $(boot)/Image.gz
 else
@@ -158,8 +162,10 @@ endif
 
 all:	$(notdir $(KBUILD_IMAGE))
 
-vmlinuz.efi: Image
-Image vmlinuz.efi: vmlinux
+image.fit: dtbs
+
+vmlinuz.efi image.fit: Image
+$(BOOT_TARGETS): vmlinux
 	$(Q)$(MAKE) $(build)=$(boot) $(boot)/$@
 
 Image.%: Image
@@ -168,12 +174,6 @@ Image.%: Image
 install: KBUILD_IMAGE := $(boot)/Image
 install zinstall:
 	$(call cmd,install)
-
-PHONY += vdso_install
-vdso_install:
-	$(Q)$(MAKE) $(build)=arch/arm64/kernel/vdso $@
-	$(if $(CONFIG_COMPAT_VDSO), \
-		$(Q)$(MAKE) $(build)=arch/arm64/kernel/vdso32 $@)
 
 archprepare:
 	$(Q)$(MAKE) $(build)=arch/arm64/tools kapi
@@ -205,6 +205,9 @@ ifdef CONFIG_COMPAT_VDSO
 endif
 endif
 
+vdso-install-y				+= arch/arm64/kernel/vdso/vdso.so.dbg
+vdso-install-$(CONFIG_COMPAT_VDSO)	+= arch/arm64/kernel/vdso32/vdso.so.dbg:vdso32.so
+
 include $(srctree)/scripts/Makefile.defconf
 
 PHONY += virtconfig
@@ -214,6 +217,7 @@ virtconfig:
 define archhelp
   echo  '* Image.gz      - Compressed kernel image (arch/$(ARCH)/boot/Image.gz)'
   echo  '  Image         - Uncompressed kernel image (arch/$(ARCH)/boot/Image)'
+  echo  '  image.fit     - Flat Image Tree (arch/$(ARCH)/boot/image.fit)'
   echo  '  install       - Install uncompressed kernel'
   echo  '  zinstall      - Install compressed kernel'
   echo  '                  Install using (your) ~/bin/installkernel or'

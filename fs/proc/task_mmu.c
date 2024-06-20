@@ -968,12 +968,17 @@ static int show_smaps_rollup(struct seq_file *m, void *v)
 				break;
 
 			/* Case 1 and 2 above */
-			if (vma->vm_start >= last_vma_end)
+			if (vma->vm_start >= last_vma_end) {
+				smap_gather_stats(vma, &mss, 0);
+				last_vma_end = vma->vm_end;
 				continue;
+			}
 
 			/* Case 4 above */
-			if (vma->vm_end > last_vma_end)
+			if (vma->vm_end > last_vma_end) {
 				smap_gather_stats(vma, &mss, last_vma_end);
+				last_vma_end = vma->vm_end;
+			}
 		}
 	} for_each_vma(vmi, vma);
 
@@ -1929,7 +1934,7 @@ static int reclaim_pte_range(pmd_t *pmd, unsigned long addr,
 			return 0;
 		}
 
-		if (isolate_lru_page(page))
+		if (!isolate_lru_page(page))
 			goto huge_unlock;
 
 		/*
@@ -2008,7 +2013,7 @@ regular_page:
 		if (type != RECLAIM_SHMEM && page_mapcount(page) > 1)
 			continue;
 
-		if (isolate_lru_page(page))
+		if (!isolate_lru_page(page))
 			continue;
 
 		isolated++;
