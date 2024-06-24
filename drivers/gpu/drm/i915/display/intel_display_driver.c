@@ -388,8 +388,6 @@ void intel_display_driver_register(struct drm_i915_private *i915)
 
 	intel_audio_init(i915);
 
-	intel_audio_register(i915);
-
 	intel_display_debugfs_register(i915);
 
 	/*
