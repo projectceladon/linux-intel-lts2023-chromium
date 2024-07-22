@@ -31,6 +31,7 @@
 #include <linux/tick.h>
 #include <linux/units.h>
 #include <trace/events/power.h>
+#include <trace/hooks/cpufreq.h>
 
 static LIST_HEAD(cpufreq_policy_list);
 
@@ -396,6 +397,7 @@ static void cpufreq_notify_transition(struct cpufreq_policy *policy,
 		cpufreq_stats_record_transition(policy, freqs->new);
 		cpufreq_times_record_transition(policy, freqs->new);
 		policy->cur = freqs->new;
+		trace_android_rvh_cpufreq_transition(policy);
 	}
 }
 
@@ -539,8 +541,10 @@ static unsigned int __resolve_freq(struct cpufreq_policy *policy,
 		unsigned int target_freq, unsigned int relation)
 {
 	unsigned int idx;
+	unsigned int old_target_freq = target_freq;
 
 	target_freq = clamp_val(target_freq, policy->min, policy->max);
+	trace_android_vh_cpufreq_resolve_freq(policy, &target_freq, old_target_freq);
 
 	if (!policy->freq_table)
 		return target_freq;
@@ -735,8 +739,15 @@ static ssize_t show_##file_name				\
 	return sprintf(buf, "%u\n", policy->object);	\
 }
 
+static ssize_t show_cpuinfo_max_freq(struct cpufreq_policy *policy, char *buf)
+{
+	unsigned int max_freq = policy->cpuinfo.max_freq;
+
+	trace_android_rvh_show_max_freq(policy, &max_freq);
+	return sprintf(buf, "%u\n", max_freq);
+}
+
 show_one(cpuinfo_min_freq, cpuinfo.min_freq);
-show_one(cpuinfo_max_freq, cpuinfo.max_freq);
 show_one(cpuinfo_transition_latency, cpuinfo.transition_latency);
 show_one(scaling_min_freq, min);
 show_one(scaling_max_freq, max);
@@ -1487,6 +1498,8 @@ static int cpufreq_online(unsigned int cpu)
 			goto out_destroy_policy;
 		}
 
+		trace_android_vh_cpufreq_online(policy);
+
 		blocking_notifier_call_chain(&cpufreq_policy_notifier_list,
 				CPUFREQ_CREATE_POLICY, policy);
 	}
@@ -2181,9 +2194,11 @@ unsigned int cpufreq_driver_fast_switch(struct cpufreq_policy *policy,
 					unsigned int target_freq)
 {
 	unsigned int freq;
+	unsigned int old_target_freq = target_freq;
 	int cpu;
 
 	target_freq = clamp_val(target_freq, policy->min, policy->max);
+	trace_android_vh_cpufreq_fast_switch(policy, &target_freq, old_target_freq);
 	freq = cpufreq_driver->fast_switch(policy, target_freq);
 
 	if (!freq)
@@ -2193,6 +2208,8 @@ unsigned int cpufreq_driver_fast_switch(struct cpufreq_policy *policy,
 	arch_set_freq_scale(policy->related_cpus, freq,
 			    policy->cpuinfo.max_freq);
 	cpufreq_stats_record_transition(policy, freq);
+	cpufreq_times_record_transition(policy, freq);
+	trace_android_rvh_cpufreq_transition(policy);
 
 	if (trace_cpu_frequency_enabled()) {
 		for_each_cpu(cpu, policy->cpus)
@@ -2339,6 +2356,8 @@ int __cpufreq_driver_target(struct cpufreq_policy *policy,
 		return -ENODEV;
 
 	target_freq = __resolve_freq(policy, target_freq, relation);
+
+	trace_android_vh_cpufreq_target(policy, &target_freq, old_target_freq);
 
 	pr_debug("target for CPU %u: %u kHz, relation %u, requested %u kHz\n",
 		 policy->cpu, target_freq, relation, old_target_freq);
@@ -2686,6 +2705,7 @@ static int cpufreq_set_policy(struct cpufreq_policy *policy,
 
 	return ret;
 }
+EXPORT_TRACEPOINT_SYMBOL_GPL(cpu_frequency_limits);
 
 /**
  * cpufreq_update_policy - Re-evaluate an existing cpufreq policy.
