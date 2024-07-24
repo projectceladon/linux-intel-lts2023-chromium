@@ -2162,13 +2162,17 @@ static inline void backport_led_trigger_blink(struct led_trigger *trigger,
 static inline void cfg80211_schedule_channels_check(struct wireless_dev *wdev)
 {
 }
+#if CFG80211_VERSION < KERNEL_VERSION(6,6,31)
 #define NL80211_EXT_FEATURE_DFS_CONCURRENT -1
 #define NL80211_RRF_DFS_CONCURRENT 0
+#endif
 
+#if CFG80211_VERSION < KERNEL_VERSION(6,6,21)
 struct cfg80211_ttlm_params {
 	u16 dlink[8];
 	u16 ulink[8];
 };
+#endif
 #endif
 
 #if CFG80211_VERSION < KERNEL_VERSION(6,9,0)
@@ -2187,7 +2191,12 @@ bool ieee80211_operating_class_to_chandef(u8 operating_class,
 static inline u32
 iwl7000_ieee80211_mandatory_rates(struct ieee80211_supported_band *sband)
 {
+#if CFG80211_VERSION < KERNEL_VERSION(6,6,30)
 	return ieee80211_mandatory_rates(sband, NL80211_BSS_CHAN_WIDTH_20);
+#else
+	return ieee80211_mandatory_rates(sband);
+#endif
+
 }
 #define ieee80211_mandatory_rates iwl7000_ieee80211_mandatory_rates
 #endif
