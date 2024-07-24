@@ -72,7 +72,6 @@
 #include <asm/mmu_context.h>
 #include <asm/tlb.h>
 
-#include <trace/events/fs_trace.h>
 #include <trace/events/task.h>
 #include "internal.h"
 
@@ -942,12 +941,6 @@ static struct file *do_open_execat(int fd, struct filename *name, int flags)
 	err = deny_write_access(file);
 	if (err)
 		goto exit;
-
-	if (name->name[0] != '\0') {
-		fsnotify_open(file);
-
-		trace_open_exec(name->name);
-	}
 
 out:
 	return file;
