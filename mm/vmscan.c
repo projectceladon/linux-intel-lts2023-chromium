@@ -4503,7 +4503,6 @@ static bool try_to_inc_max_seq(struct lruvec *lruvec, unsigned long max_seq,
 	struct lru_gen_folio *lrugen = &lruvec->lrugen;
 
 	VM_WARN_ON_ONCE(max_seq > READ_ONCE(lrugen->max_seq));
-        kernfs_notify(lru_gen_admin_node);
 	/* see the comment in iterate_mm_list() */
 	if (max_seq <= READ_ONCE(lruvec->mm_state.seq)) {
 		success = false;
@@ -4538,8 +4537,10 @@ static bool try_to_inc_max_seq(struct lruvec *lruvec, unsigned long max_seq,
 			walk_mm(lruvec, mm, walk);
 	} while (mm);
 done:
-	if (success)
+	if (success) {
 		inc_max_seq(lruvec, can_swap, force_scan);
+		kernfs_notify(lru_gen_admin_node);
+	}
 
 	return success;
 }
