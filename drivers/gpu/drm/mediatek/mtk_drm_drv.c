@@ -969,8 +969,9 @@ static void mtk_drm_remove(struct platform_device *pdev)
 
 static void mtk_drm_shutdown(struct platform_device *pdev)
 {
-	component_master_del(&pdev->dev, &mtk_drm_ops);
-	pm_runtime_disable(&pdev->dev);
+	struct mtk_drm_private *private = platform_get_drvdata(pdev);
+
+	drm_atomic_helper_shutdown(private->drm);
 }
 
 static int mtk_drm_sys_prepare(struct device *dev)
