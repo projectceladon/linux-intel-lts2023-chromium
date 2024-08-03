@@ -64,6 +64,10 @@
 	};
 };
 
+&pcie0 {
+	status = "okay";
+};
+
 &pio_default{
 	low_power_pu_pd_pins {
 		pinmux = <PINMUX_GPIO8__FUNC_GPIO8>,
