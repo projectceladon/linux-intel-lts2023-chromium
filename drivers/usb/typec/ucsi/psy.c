@@ -300,22 +300,18 @@ static int ucsi_psy_set_charge_control_limit_max(struct ucsi_connector *con,
 	 * Writing a negative value to the charge control limit max implies the
 	 * port should not accept charge. Disable the sink path for a negative
 	 * charge control limit, and enable the sink path for a positive charge
-	 * control limit.
+	 * control limit. If the requested charge port is a source, update the
+	 * power role.
 	 */
 	int ret;
-	bool sink_path;
-
-	if (!con->typec_cap.ops || !con->typec_cap.ops->pr_set)
-		return -EINVAL;
+	bool sink_path = false;
 
 	if (val->intval >= 0) {
 		sink_path = true;
+		if (!con->typec_cap.ops || !con->typec_cap.ops->pr_set)
+			return -EINVAL;
+
 		ret = con->typec_cap.ops->pr_set(con->port, TYPEC_SINK);
-		if (ret < 0)
-			return ret;
-	} else {
-		sink_path = false;
-		ret = con->typec_cap.ops->pr_set(con->port, TYPEC_SOURCE);
 		if (ret < 0)
 			return ret;
 	}
