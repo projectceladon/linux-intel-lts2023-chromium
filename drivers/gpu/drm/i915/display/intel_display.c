@@ -4754,6 +4754,14 @@ intel_compare_buffer(const u8 *a, const u8 *b, size_t len)
 	return memcmp(a, b, len) == 0;
 }
 
+static inline void
+intel_log_infoframe(const char *level, struct device *dev,
+		    const union hdmi_infoframe *infoframe)
+{
+	if (drm_debug_syslog_enabled(DRM_UT_KMS))
+		hdmi_infoframe_log(level, dev, infoframe);
+}
+
 static void
 pipe_config_infoframe_mismatch(struct drm_i915_private *dev_priv,
 			       bool fastset, const char *name,
@@ -4767,15 +4775,15 @@ pipe_config_infoframe_mismatch(struct drm_i915_private *dev_priv,
 		drm_dbg_kms(&dev_priv->drm,
 			    "fastset requirement not met in %s infoframe\n", name);
 		drm_dbg_kms(&dev_priv->drm, "expected:\n");
-		hdmi_infoframe_log(KERN_DEBUG, dev_priv->drm.dev, a);
+		intel_log_infoframe(KERN_DEBUG, dev_priv->drm.dev, a);
 		drm_dbg_kms(&dev_priv->drm, "found:\n");
-		hdmi_infoframe_log(KERN_DEBUG, dev_priv->drm.dev, b);
+		intel_log_infoframe(KERN_DEBUG, dev_priv->drm.dev, b);
 	} else {
 		drm_err(&dev_priv->drm, "mismatch in %s infoframe\n", name);
 		drm_err(&dev_priv->drm, "expected:\n");
-		hdmi_infoframe_log(KERN_ERR, dev_priv->drm.dev, a);
+		intel_log_infoframe(KERN_ERR, dev_priv->drm.dev, a);
 		drm_err(&dev_priv->drm, "found:\n");
-		hdmi_infoframe_log(KERN_ERR, dev_priv->drm.dev, b);
+		intel_log_infoframe(KERN_ERR, dev_priv->drm.dev, b);
 	}
 }
 
@@ -4824,7 +4832,7 @@ pipe_config_buffer_mismatch(struct drm_i915_private *dev_priv,
 			    const u8 *a, const u8 *b, size_t len)
 {
 	if (fastset) {
-		if (!drm_debug_enabled(DRM_UT_KMS))
+		if (!drm_debug_syslog_enabled(DRM_UT_KMS))
 			return;
 
 		/* only dump up to the last difference */
@@ -6676,8 +6684,8 @@ static void intel_enable_crtc(struct intel_atomic_state *state,
 	intel_crtc_enable_pipe_crc(crtc);
 }
 
-static void intel_update_crtc(struct intel_atomic_state *state,
-			      struct intel_crtc *crtc)
+static void intel_pre_update_crtc(struct intel_atomic_state *state,
+				  struct intel_crtc *crtc)
 {
 	struct drm_i915_private *i915 = to_i915(state->base.dev);
 	const struct intel_crtc_state *old_crtc_state =
@@ -6719,6 +6727,15 @@ static void intel_update_crtc(struct intel_atomic_state *state,
 		intel_color_commit_noarm(new_crtc_state);
 
 	intel_crtc_planes_update_noarm(state, crtc);
+}
+
+static void intel_update_crtc(struct intel_atomic_state *state,
+			      struct intel_crtc *crtc)
+{
+	const struct intel_crtc_state *old_crtc_state =
+		intel_atomic_get_old_crtc_state(state, crtc);
+	struct intel_crtc_state *new_crtc_state =
+		intel_atomic_get_new_crtc_state(state, crtc);
 
 	/* Perform vblank evasion around commit operation */
 	intel_pipe_update_start(state, crtc);
@@ -6747,7 +6764,7 @@ static void intel_update_crtc(struct intel_atomic_state *state,
 	 * valid pipe configuration from the BIOS we need to take care
 	 * of enabling them on the CRTC's first fastset.
 	 */
-	if (intel_crtc_needs_fastset(new_crtc_state) && !modeset &&
+	if (intel_crtc_needs_fastset(new_crtc_state) &&
 	    old_crtc_state->inherited)
 		intel_crtc_arm_fifo_underrun(crtc, new_crtc_state);
 }
@@ -6845,6 +6862,13 @@ static void intel_commit_modeset_enables(struct intel_atomic_state *state)
 			continue;
 
 		intel_enable_crtc(state, crtc);
+		intel_pre_update_crtc(state, crtc);
+	}
+
+	for_each_new_intel_crtc_in_state(state, crtc, new_crtc_state, i) {
+		if (!new_crtc_state->hw.active)
+			continue;
+
 		intel_update_crtc(state, crtc);
 	}
 }
@@ -6882,6 +6906,17 @@ static void skl_commit_modeset_enables(struct intel_atomic_state *state)
 	 * So first lets enable all pipes that do not need a fullmodeset as
 	 * those don't have any external dependency.
 	 */
+	for_each_new_intel_crtc_in_state(state, crtc, new_crtc_state, i) {
+		enum pipe pipe = crtc->pipe;
+
+		if ((update_pipes & BIT(pipe)) == 0)
+			continue;
+
+		intel_pre_update_crtc(state, crtc);
+	}
+
+	intel_dbuf_mbus_pre_ddb_update(state);
+
 	while (update_pipes) {
 		for_each_oldnew_intel_crtc_in_state(state, crtc, old_crtc_state,
 						    new_crtc_state, i) {
@@ -6911,6 +6946,8 @@ static void skl_commit_modeset_enables(struct intel_atomic_state *state)
 				intel_crtc_wait_for_next_vblank(crtc);
 		}
 	}
+
+	intel_dbuf_mbus_post_ddb_update(state);
 
 	update_pipes = modeset_pipes;
 
@@ -6952,6 +6989,15 @@ static void skl_commit_modeset_enables(struct intel_atomic_state *state)
 	/*
 	 * Finally we do the plane updates/etc. for all pipes that got enabled.
 	 */
+	for_each_new_intel_crtc_in_state(state, crtc, new_crtc_state, i) {
+		enum pipe pipe = crtc->pipe;
+
+		if ((update_pipes & BIT(pipe)) == 0)
+			continue;
+
+		intel_pre_update_crtc(state, crtc);
+	}
+
 	for_each_new_intel_crtc_in_state(state, crtc, new_crtc_state, i) {
 		enum pipe pipe = crtc->pipe;
 
@@ -7175,7 +7221,6 @@ static void intel_atomic_commit_tail(struct intel_atomic_state *state)
 	intel_encoders_update_prepare(state);
 
 	intel_dbuf_pre_plane_update(state);
-	intel_mbus_dbox_update(state);
 
 	for_each_new_intel_crtc_in_state(state, crtc, new_crtc_state, i) {
 		if (new_crtc_state->do_async_flip)
