@@ -3687,7 +3687,7 @@ static ssize_t current_parent_write(struct file *file, const char __user *ubuf,
 		return -ENOENT;
 
 	clk_prepare_lock();
-	err = clk_core_set_parent_nolock(core, parent, false);
+	err = clk_core_set_parent_nolock(core, parent);
 	clk_prepare_unlock();
 	if (err)
 		return err;

@@ -66,6 +66,33 @@ enum {
 
 #define EVENTFS_MODE_MASK	(EVENTFS_SAVE_MODE - 1)
 
+struct eventfs_root_inode {
+        struct eventfs_inode            ei;
+        struct inode                    *parent_inode;
+        struct dentry                   *events_dir;
+};
+
+static struct eventfs_root_inode *get_root_inode(struct eventfs_inode *ei)
+{
+        WARN_ON_ONCE(!ei->is_events);
+        return container_of(ei, struct eventfs_root_inode, ei);
+}
+
+static void free_ei_rcu(struct rcu_head *rcu)
+{
+    struct eventfs_inode *ei = container_of(rcu, struct eventfs_inode, rcu);
+    struct eventfs_root_inode *rei;
+
+    kfree(ei->entry_attrs);
+    kfree_const(ei->name);
+    if (ei->is_events) {
+            rei = get_root_inode(ei);
+            kfree(rei);
+    } else {
+            kfree(ei);
+    }
+}
+
 /*
  * eventfs_inode reference count management.
  *
@@ -77,18 +104,13 @@ enum {
 static void release_ei(struct kref *ref)
 {
 	struct eventfs_inode *ei = container_of(ref, struct eventfs_inode, kref);
+	struct eventfs_root_inode *rei;
 
 	WARN_ON_ONCE(!ei->is_freed);
 
 	kfree(ei->entry_attrs);
 	kfree_const(ei->name);
 	kfree_rcu(ei, rcu);
-
-	for (int i = 0; i < ei->nr_entries; i++) {
-		entry = &ei->entries[i];
-		if (entry->release)
-			entry->release(entry->name, ei->data);
-	}
 
 	call_srcu(&eventfs_srcu, &ei->rcu, free_ei_rcu);
 }

@@ -66,7 +66,9 @@ iwl_construct_mld(struct iwl_mld *mld, struct iwl_trans *trans,
 	mld->cfg = cfg;
 	mld->fw = fw;
 
+#ifdef CPTCFG_IWLWIFI_DEBUGFS
 	iwl_mld_add_debugfs_files(mld, debugfs_dir);
+#endif
 }
 
 static void

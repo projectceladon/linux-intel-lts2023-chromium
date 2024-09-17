@@ -82,7 +82,7 @@ WRAP_LOCKED(cfg80211_links_removed)(struct net_device *dev, u16 removed_links)
 static inline u32
 iwl7000_ieee80211_mandatory_rates(struct ieee80211_supported_band *sband)
 {
-	return ieee80211_mandatory_rates(sband, NL80211_BSS_CHAN_WIDTH_20);
+	return ieee80211_mandatory_rates(sband);
 }
 #define ieee80211_mandatory_rates iwl7000_ieee80211_mandatory_rates
 
@@ -171,11 +171,6 @@ static inline void cfg80211_schedule_channels_check(struct wireless_dev *wdev)
 }
 #define NL80211_EXT_FEATURE_DFS_CONCURRENT -1
 #define NL80211_RRF_DFS_CONCURRENT 0
-
-struct cfg80211_ttlm_params {
-	u16 dlink[8];
-	u16 ulink[8];
-};
 
 bool
 ieee80211_uhb_power_type_valid(struct ieee80211_mgmt *mgmt, size_t len,

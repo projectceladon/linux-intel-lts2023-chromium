@@ -1860,6 +1860,7 @@ cfg80211_update_known_bss(struct cfg80211_registered_device *rdev,
 		if (old) {
 			cfg80211_check_stuck_ecsa(rdev, known, old);
 			kfree_rcu((struct cfg80211_bss_ies *)old, rcu_head);
+		}
 	}
 
 	if (rcu_access_pointer(new->pub.beacon_ies)) {
