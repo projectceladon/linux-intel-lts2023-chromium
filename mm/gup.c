@@ -97,7 +97,6 @@ retry:
 	return folio;
 }
 
-
 static void gup_put_folio(struct folio *folio, int refs, unsigned int flags)
 {
 	if (flags & FOLL_PIN) {
