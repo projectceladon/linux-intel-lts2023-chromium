@@ -82,7 +82,11 @@ WRAP_LOCKED(cfg80211_links_removed)(struct net_device *dev, u16 removed_links)
 static inline u32
 iwl7000_ieee80211_mandatory_rates(struct ieee80211_supported_band *sband)
 {
+#if LINUX_VERSION_IS_LESS(6,6,30)
 	return ieee80211_mandatory_rates(sband, NL80211_BSS_CHAN_WIDTH_20);
+#else
+	return ieee80211_mandatory_rates(sband);
+#endif
 }
 #define ieee80211_mandatory_rates iwl7000_ieee80211_mandatory_rates
 
@@ -169,13 +173,17 @@ ssize_t wiphy_locked_debugfs_write(struct wiphy *wiphy, struct file *file,
 static inline void cfg80211_schedule_channels_check(struct wireless_dev *wdev)
 {
 }
+#if LINUX_VERSION_IS_LESS(6,6,31)
 #define NL80211_EXT_FEATURE_DFS_CONCURRENT -1
 #define NL80211_RRF_DFS_CONCURRENT 0
+#endif
 
+#if LINUX_VERSION_IS_LESS(6,6,21)
 struct cfg80211_ttlm_params {
 	u16 dlink[8];
 	u16 ulink[8];
 };
+#endif
 
 bool
 ieee80211_uhb_power_type_valid(struct ieee80211_mgmt *mgmt, size_t len,

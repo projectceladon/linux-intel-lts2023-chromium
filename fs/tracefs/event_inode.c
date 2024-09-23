@@ -84,7 +84,6 @@ static void release_ei(struct kref *ref)
 	kfree_const(ei->name);
 	kfree_rcu(ei, rcu);
 
-	call_rcu(&ei->rcu, free_ei_rcu);
 }
 
 static inline void put_ei(struct eventfs_inode *ei)
