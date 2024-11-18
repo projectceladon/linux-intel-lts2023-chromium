@@ -455,7 +455,7 @@ static void __ieee80211_scan_completed(struct ieee80211_hw *hw, bool aborted)
 	}
 
 	/* Set power back to normal operating levels. */
-	ieee80211_hw_config(local, 0);
+	ieee80211_hw_conf_chan(local);
 
 	if (!hw_scan && was_scanning) {
 		ieee80211_configure_filter(local);
@@ -472,7 +472,7 @@ static void __ieee80211_scan_completed(struct ieee80211_hw *hw, bool aborted)
 	 * the scan was in progress; if there was none this will
 	 * just be a no-op for the particular interface.
 	 */
-	list_for_each_entry_rcu(sdata, &local->interfaces, list) {
+	list_for_each_entry(sdata, &local->interfaces, list) {
 		if (ieee80211_sdata_running(sdata))
 			wiphy_work_queue(sdata->local->hw.wiphy, &sdata->work);
 	}
@@ -502,7 +502,7 @@ static int ieee80211_start_sw_scan(struct ieee80211_local *local,
 				   struct ieee80211_sub_if_data *sdata)
 {
 	/* Software scan is not supported in multi-channel cases */
-	if (local->use_chanctx)
+	if (!local->emulate_chanctx)
 		return -EOPNOTSUPP;
 
 	/*
@@ -532,7 +532,7 @@ static int ieee80211_start_sw_scan(struct ieee80211_local *local,
 	ieee80211_configure_filter(local);
 
 	/* We need to set power level at maximum rate for scanning. */
-	ieee80211_hw_config(local, 0);
+	ieee80211_hw_conf_chan(local);
 
 	wiphy_delayed_work_queue(local->hw.wiphy, &local->scan_work, 0);
 
@@ -619,7 +619,7 @@ static void ieee80211_send_scan_probe_req(struct ieee80211_sub_if_data *sdata,
 				cpu_to_le16(IEEE80211_SN_TO_SEQ(sn));
 		}
 		IEEE80211_SKB_CB(skb)->flags |= tx_flags;
-		IEEE80211_SKB_CB(skb)->control.flags |= IEEE80211_TX_CTRL_SCAN_TX;
+		IEEE80211_SKB_CB(skb)->control.flags |= IEEE80211_TX_CTRL_DONT_USE_RATE_MASK;
 		ieee80211_tx_skb_tid_band(sdata, skb, 7, channel->band);
 	}
 }
@@ -758,7 +758,7 @@ static int __ieee80211_start_scan(struct ieee80211_sub_if_data *sdata,
 	if (hw_scan) {
 		__set_bit(SCAN_HW_SCANNING, &local->scanning);
 	} else if ((req->n_channels == 1) &&
-		   (req->channels[0] == local->_oper_chandef.chan)) {
+		   (req->channels[0] == local->hw.conf.chandef.chan)) {
 		/*
 		 * If we are scanning only on the operating channel
 		 * then we do not need to stop normal activities
@@ -776,7 +776,7 @@ static int __ieee80211_start_scan(struct ieee80211_sub_if_data *sdata,
 		ieee80211_configure_filter(local); /* accept probe-responses */
 
 		/* We need to ensure power level is at max for scanning. */
-		ieee80211_hw_config(local, 0);
+		ieee80211_hw_conf_chan(local);
 
 		if ((req->channels[0]->flags & (IEEE80211_CHAN_NO_IR |
 						IEEE80211_CHAN_RADAR)) ||
@@ -941,13 +941,13 @@ static void ieee80211_scan_state_set_channel(struct ieee80211_local *local,
 	/* If scanning on oper channel, use whatever channel-type
 	 * is currently in use.
 	 */
-	if (chan == local->_oper_chandef.chan)
-		local->scan_chandef = local->_oper_chandef;
+	if (chan == local->hw.conf.chandef.chan)
+		local->scan_chandef = local->hw.conf.chandef;
 	else
 		local->scan_chandef.width = NL80211_CHAN_WIDTH_20_NOHT;
 
 set_channel:
-	if (ieee80211_hw_config(local, IEEE80211_CONF_CHANGE_CHANNEL))
+	if (ieee80211_hw_conf_chan(local))
 		skip = 1;
 
 	/* advance state machine to next channel/band */
@@ -988,7 +988,7 @@ static void ieee80211_scan_state_suspend(struct ieee80211_local *local,
 {
 	/* switch back to the operating channel */
 	local->scan_chandef.chan = NULL;
-	ieee80211_hw_config(local, IEEE80211_CONF_CHANGE_CHANNEL);
+	ieee80211_hw_conf_chan(local);
 
 	/* disable PS */
 	ieee80211_offchannel_return(local);

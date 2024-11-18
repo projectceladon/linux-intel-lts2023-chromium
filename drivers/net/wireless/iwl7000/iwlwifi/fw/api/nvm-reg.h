@@ -52,6 +52,11 @@ enum iwl_regulatory_and_nvm_subcmd_ids {
 	MCC_ALLOWED_AP_TYPE_CMD = 0x5,
 
 	/**
+	 * @TX_POWER_LIMIT_OVERRIDE_CMD: &struct iwl_tx_power_override_cmd
+	 */
+	TX_POWER_LIMIT_OVERRIDE_CMD = 0x6,
+
+	/**
 	 * @PNVM_INIT_COMPLETE_NTFY: &struct iwl_pnvm_init_complete_ntfy
 	 */
 	PNVM_INIT_COMPLETE_NTFY = 0xFE,
@@ -120,7 +125,7 @@ struct iwl_nvm_access_cmd {
 } __packed; /* NVM_ACCESS_CMD_API_S_VER_2 */
 
 /**
- * struct iwl_nvm_access_resp_ver2 - response to NVM_ACCESS_CMD
+ * struct iwl_nvm_access_resp - response to NVM_ACCESS_CMD
  * @offset: offset in bytes into the section
  * @length: in bytes, either how much was written or read
  * @type: NVM_SECTION_TYPE_*
@@ -212,7 +217,7 @@ struct iwl_nvm_get_info_phy {
 #define IWL_NUM_CHANNELS	110
 
 /**
- * struct iwl_nvm_get_info_regulatory - regulatory information
+ * struct iwl_nvm_get_info_regulatory_v1 - regulatory information
  * @lar_enabled: is LAR enabled
  * @channel_profile: regulatory data of this channel
  * @reserved: reserved
@@ -759,5 +764,13 @@ struct iwl_mcc_allowed_ap_type_cmd {
 	u8 offset_map[UATS_TABLE_ROW_SIZE][UATS_TABLE_COL_SIZE];
 	__le16 reserved;
 } __packed; /* MCC_ALLOWED_AP_TYPE_CMD_API_S_VER_1 */
+
+/**
+ * struct iwl_tx_power_override_cmd - control tx power override.
+ * @reserved: reserved
+ */
+struct iwl_tx_power_override_cmd {
+	__le32 reserved;
+} __packed; /* REGULATORY_CHROME_20_MHZ_POWER_LIMIT_OVERRIDE_CMD_API_S_VER_1 */
 
 #endif /* __iwl_fw_api_nvm_reg_h__ */
