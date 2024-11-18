@@ -1049,13 +1049,8 @@ static int svc_i3c_master_xfer(struct svc_i3c_master *master,
 		       SVC_I3C_MCTRL_IBIRESP_NACK |
 		       SVC_I3C_MCTRL_DIR(rnw) |
 		       SVC_I3C_MCTRL_ADDR(addr) |
-		       SVC_I3C_MCTRL_RDTERM(*actual_len),
+		       SVC_I3C_MCTRL_RDTERM(*read_len),
 		       master->regs + SVC_I3C_MCTRL);
-
-		ret = readl_poll_timeout(master->regs + SVC_I3C_MSTATUS, reg,
-				 SVC_I3C_MSTATUS_MCTRLDONE(reg), 0, 1000);
-		if (ret)
-			goto emit_stop;
 
 		if (readl(master->regs + SVC_I3C_MERRWARN) & SVC_I3C_MERRWARN_NACK) {
 			/*
@@ -1082,7 +1077,7 @@ static int svc_i3c_master_xfer(struct svc_i3c_master *master,
 				writel(SVC_I3C_MERRWARN_NACK, master->regs + SVC_I3C_MERRWARN);
 			} else {
 				ret = -ENXIO;
-				*actual_len = 0;
+				*read_len = 0;
 				goto emit_stop;
 			}
 		} else {
