@@ -3906,9 +3906,11 @@ static void reset_ctrl_pos(struct lruvec *lruvec, int type)
 static unsigned long retain_cost(struct ctrl_pos *retain, struct ctrl_pos *evict)
 {
 	unsigned long unnecessary_refaults, potential_refault;
+	unsigned long total_size = retain->gen_size + evict->gen_size;
 
 	unnecessary_refaults = (retain->num_victims << COST_SHIFT) / (retain->gen_size + 1);
 	potential_refault = (evict->refaulted << COST_SHIFT) / (evict->total + 1);
+	potential_refault = potential_refault * retain->gen_size / (total_size + 1);
 	return retain->gain * (unnecessary_refaults + potential_refault);
 }
 
@@ -5915,8 +5917,8 @@ static void lru_gen_shrink_node(struct pglist_data *pgdat, struct scan_control *
 
 	blk_finish_plug(&plug);
 done:
-	/* kswapd should never fail */
-	pgdat->kswapd_failures = 0;
+	if (sc->nr_reclaimed > reclaimed)
+		pgdat->kswapd_failures = 0;
 }
 
 /******************************************************************************

@@ -9,6 +9,8 @@
 
 #define DM_MSG_PREFIX		"default-key"
 
+#define DM_DEFAULT_KEY_MAX_KEY_SIZE	64
+
 static const struct dm_default_key_cipher {
 	const char *name;
 	enum blk_crypto_mode_num mode_num;
@@ -65,9 +67,11 @@ lookup_cipher(const char *cipher_string)
 static void default_key_dtr(struct dm_target *ti)
 {
 	struct default_key_c *dkc = ti->private;
+	struct blk_crypto_key *blk_key = &dkc->key;
 
 	if (dkc->dev) {
-		blk_crypto_evict_key(dkc->dev->bdev, &dkc->key);
+		if (blk_key->size > 0)
+			blk_crypto_evict_key(dkc->dev->bdev, blk_key);
 		dm_put_device(ti, dkc->dev);
 	}
 	kfree_sensitive(dkc->cipher_string);
@@ -80,7 +84,7 @@ static int default_key_ctr_optional(struct dm_target *ti,
 	struct default_key_c *dkc = ti->private;
 	struct dm_arg_set as;
 	static const struct dm_arg _args[] = {
-		{0, 4, "Invalid number of feature args"},
+		{0, 3, "Invalid number of feature args"},
 	};
 	unsigned int opt_params;
 	const char *opt_string;
@@ -360,7 +364,7 @@ static int default_key_prepare_ioctl(struct dm_target *ti,
 
 	/* Only pass ioctls through if the device sizes match exactly. */
 	if (dkc->start != 0 ||
-	    ti->len != i_size_read(dev->bdev->bd_inode) >> SECTOR_SHIFT)
+	    ti->len != bdev_nr_sectors(dev->bdev))
 		return 1;
 	return 0;
 }

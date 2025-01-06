@@ -788,6 +788,9 @@ int i915_gem_get_obj_info(struct drm_i915_error_state_buf *m,
 
 #define HAS_RPS(i915)	(INTEL_INFO(i915)->has_rps)
 
+#define HAS_PXP(i915) \
+	(IS_ENABLED(CONFIG_DRM_I915_PXP) && INTEL_INFO(i915)->has_pxp)
+
 #define HAS_HECI_PXP(i915) \
 	(INTEL_INFO(i915)->has_heci_pxp)
 
