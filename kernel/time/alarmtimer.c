@@ -923,7 +923,9 @@ static const struct dev_pm_ops alarmtimer_pm_ops = {
 static struct platform_driver alarmtimer_driver = {
 	.driver = {
 		.name = "alarmtimer",
+#if 0
 		.pm = &alarmtimer_pm_ops,
+#endif
 	}
 };
 
