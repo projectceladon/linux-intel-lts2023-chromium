@@ -77,10 +77,6 @@ void iwl_construct_mld(struct iwl_mld *mld, struct iwl_trans *trans,
 	mld->hw = hw;
 	mld->wiphy = hw->wiphy;
 
-#ifdef CPTCFG_IWLWIFI_DEBUGFS
-	iwl_mld_add_debugfs_files(mld, debugfs_dir);
-#endif
-
 	iwl_notification_wait_init(&mld->notif_wait);
 
 	/* Setup async RX handling */

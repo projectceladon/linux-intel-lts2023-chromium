@@ -240,50 +240,6 @@ sof_ipc4_set_generic_control_data(struct snd_sof_dev *sdev,
 	return ret;
 }
 
-static void sof_ipc4_refresh_generic_control(struct snd_sof_control *scontrol)
-{
-	struct sof_ipc4_control_data *cdata = scontrol->ipc_control_data;
-	struct snd_soc_component *scomp = scontrol->scomp;
-	struct sof_ipc4_control_msg_payload *data;
-	struct sof_ipc4_msg *msg = &cdata->msg;
-	size_t data_size;
-	unsigned int i;
-	int ret;
-
-	if (!scontrol->comp_data_dirty)
-		return;
-
-	if (!pm_runtime_active(scomp->dev))
-		return;
-
-	data_size = struct_size(data, chanv, scontrol->num_channels);
-	data = kmalloc(data_size, GFP_KERNEL);
-	if (!data)
-		return;
-
-	data->id = cdata->index;
-	data->num_elems = scontrol->num_channels;
-	msg->data_ptr = data;
-	msg->data_size = data_size;
-
-	scontrol->comp_data_dirty = false;
-	ret = sof_ipc4_set_get_kcontrol_data(scontrol, false, true);
-	msg->data_ptr = NULL;
-	msg->data_size = 0;
-	if (!ret) {
-		for (i = 0; i < scontrol->num_channels; i++) {
-			cdata->chanv[i].channel = data->chanv[i].channel;
-			cdata->chanv[i].value = data->chanv[i].value;
-		}
-	} else {
-		dev_err(scomp->dev, "Failed to read control data for %s\n",
-			scontrol->name);
-		scontrol->comp_data_dirty = true;
-	}
-
-	kfree(data);
-}
-
 static bool sof_ipc4_switch_put(struct snd_sof_control *scontrol,
 				struct snd_ctl_elem_value *ucontrol)
 {
@@ -333,8 +289,6 @@ static int sof_ipc4_switch_get(struct snd_sof_control *scontrol,
 {
 	struct sof_ipc4_control_data *cdata = scontrol->ipc_control_data;
 	unsigned int i;
-
-	sof_ipc4_refresh_generic_control(scontrol);
 
 	/* read back each channel */
 	for (i = 0; i < scontrol->num_channels; i++)
@@ -392,8 +346,6 @@ static int sof_ipc4_enum_get(struct snd_sof_control *scontrol,
 {
 	struct sof_ipc4_control_data *cdata = scontrol->ipc_control_data;
 	unsigned int i;
-
-	sof_ipc4_refresh_generic_control(scontrol);
 
 	/* read back each channel */
 	for (i = 0; i < scontrol->num_channels; i++)

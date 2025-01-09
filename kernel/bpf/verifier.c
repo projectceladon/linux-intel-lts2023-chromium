@@ -8724,7 +8724,7 @@ skip_type_check:
 	{
 		int size = int_ptr_type_to_size(arg_type);
 
-		err = check_helper_mem_access(env, regno, size, false, meta);
+		err = check_helper_mem_access(env, regno, size, arg_type & MEM_WRITE ? BPF_WRITE : BPF_READ, false, meta);
 		if (err)
 			return err;
 		err = check_ptr_alignment(env, reg, 0, size, true);

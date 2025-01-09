@@ -2146,8 +2146,6 @@ static void zram_destroy_comps(struct zram *zram)
 			kfree(zram->comp_algs[prio]);
 		zram->comp_algs[prio] = NULL;
 	}
-
-	zram_comp_params_reset(zram);
 }
 
 static void zram_reset_device(struct zram *zram)
