@@ -284,7 +284,9 @@ iwl_op_mode_mld_start(struct iwl_trans *trans, const struct iwl_cfg *cfg,
 
 	iwl_construct_mld(mld, trans, cfg, fw, hw);
 
-	iwl_mld_add_debugfs_files(mld, dbgfs_dir);
+	#ifdef CPTCFG_IWLWIFI_DEBUGFS
+		iwl_mld_add_debugfs_files(mld, dbgfs_dir);
+	#endif
 
 	iwl_mld_construct_fw_runtime(mld, trans, fw, dbgfs_dir);
 
