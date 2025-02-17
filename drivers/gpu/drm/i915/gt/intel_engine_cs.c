@@ -1563,6 +1563,8 @@ int intel_engines_init(struct intel_gt *gt)
 			return err;
 
 		intel_engine_add_user(engine);
+
+		i915_gpu_work_stats_init(engine);
 	}
 
 	return 0;
@@ -1583,6 +1585,8 @@ void intel_engine_cleanup_common(struct intel_engine_cs *engine)
 	intel_breadcrumbs_put(engine->breadcrumbs);
 
 	intel_engine_fini_retire(engine);
+	// TODO: Handle this carefully
+	i915_gpu_work_stats_fini(engine);
 	intel_engine_cleanup_cmd_parser(engine);
 
 	if (engine->default_state)
