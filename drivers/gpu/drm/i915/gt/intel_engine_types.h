@@ -26,6 +26,7 @@
 #include "intel_uncore.h"
 #include "intel_wakeref.h"
 #include "intel_workarounds_types.h"
+#include "i915_gpu_work.h"
 
 /* HW Engine class + instance */
 #define RENDER_CLASS		0
@@ -480,6 +481,7 @@ struct intel_engine_cs {
 		struct i915_pmu_sample sample[I915_ENGINE_SAMPLE_COUNT];
 	} pmu;
 
+	struct i915_engine_work gpu_work;
 	struct intel_hw_status_page status_page;
 	struct i915_ctx_workarounds wa_ctx;
 	struct i915_wa_list ctx_wa_list;

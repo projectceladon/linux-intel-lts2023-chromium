@@ -405,6 +405,11 @@ bool i915_request_retire(struct i915_request *rq)
 	rq->engine->remove_active_request(rq);
 	GEM_BUG_ON(!llist_empty(&rq->execute_cb));
 
+	/*
+	 * Update the engine busyness stats for this request
+	 */
+	i915_gpu_work_process_ctx(rq->context, &rq->engine->gpu_work);
+
 	__list_del_entry(&rq->link); /* poison neither prev/next (RCU walks) */
 
 	intel_context_exit(rq->context);
@@ -675,6 +680,11 @@ bool __i915_request_submit(struct i915_request *request)
 active:
 	clear_bit(I915_FENCE_FLAG_PQUEUE, &request->fence.flags);
 	set_bit(I915_FENCE_FLAG_ACTIVE, &request->fence.flags);
+
+	struct intel_context *ce = request->context;
+	if (unlikely(list_empty(&ce->record.ws_link))) {
+		atomic64_set(&ce->record.start_time_ns, ktime_get_raw_ns());
+	}
 
 	/*
 	 * XXX Rollback bonded-execution on __i915_request_unsubmit()?
