@@ -84,6 +84,8 @@ i915-$(CONFIG_DEBUG_FS) += \
 i915-$(CONFIG_PERF_EVENTS) += \
 	i915_pmu.o
 
+i915-y += i915_gpu_work.o
+
 # "Graphics Technology" (aka we talk to the gpu)
 gt-y += \
 	gt/gen2_engine_cs.o \
