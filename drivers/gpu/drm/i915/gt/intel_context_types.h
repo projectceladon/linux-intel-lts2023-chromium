@@ -177,6 +177,19 @@ struct intel_context {
 	/** sseu: Control eu/slice partitioning */
 	struct intel_sseu sseu;
 
+	struct work_record {
+		/* start time can be accessed b/w irq and thread
+		 * contexts. So keep it atomic
+		 */
+		atomic64_t start_time_ns;
+		/* timestamp */
+		u32 last_ts;
+		/* link to ctxs list */
+		struct list_head ws_link;
+		/* lock protecting this record */
+		spinlock_t lock;
+	} record;
+
 	/**
 	 * pinned_contexts_link: List link for the engine's pinned contexts.
 	 * This is only used if this is a perma-pinned kernel context and
