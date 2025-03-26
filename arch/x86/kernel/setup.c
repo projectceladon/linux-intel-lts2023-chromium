@@ -36,6 +36,7 @@
 #include <asm/bugs.h>
 #include <asm/cacheinfo.h>
 #include <asm/coco.h>
+#include <asm/kvm_pkvm.h>
 #include <asm/cpu.h>
 #include <asm/efi.h>
 #include <asm/gart.h>
