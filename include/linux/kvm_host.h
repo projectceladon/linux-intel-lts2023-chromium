@@ -402,6 +402,7 @@ struct kvm_vcpu {
 	 */
 	struct kvm_memory_slot *last_used_slot;
 	u64 last_used_slot_gen;
+	s64 pkvm_shadow_vcpu_handle;
 };
 
 /*
@@ -711,6 +712,18 @@ struct kvm_memslots {
 	int node_idx;
 };
 
+struct kvm_protected_vm {
+        int shadow_vm_handle;
+
+        struct list_head pinned_pages;
+        spinlock_t pinned_page_lock;
+};
+
+struct kvm_pinned_page {
+        struct list_head list;
+        struct page *page;
+};
+
 struct kvm {
 #ifdef KVM_HAVE_MMU_RWLOCK
 	rwlock_t mmu_lock;
@@ -828,6 +841,7 @@ struct kvm {
 #ifdef CONFIG_PARAVIRT_SCHED_KVM
 	bool pv_sched_enabled;
 #endif
+	struct kvm_protected_vm pkvm;
 };
 
 #define kvm_err(fmt, ...) \

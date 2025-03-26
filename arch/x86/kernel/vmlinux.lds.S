@@ -111,6 +111,35 @@ PHDRS {
 	note PT_NOTE FLAGS(0);          /* ___ */
 }
 
+#ifdef CONFIG_PKVM_INTEL
+#include <asm/pkvm_image.h>
+
+#define PKVM_TEXT                                                       \
+        . = ALIGN(PAGE_SIZE);                                           \
+        __pkvm_text_start = .;                                          \
+        *(PKVM_SECTION_NAME(.text))                                     \
+        . = ALIGN(PAGE_SIZE);                                           \
+        __pkvm_text_end = .;
+
+#define PKVM_BSS                                                        \
+        . = ALIGN(PAGE_SIZE);                                           \
+        __pkvm_bss_start = .;                                           \
+        *(PKVM_SECTION_NAME(.bss))                                      \
+        . = ALIGN(PAGE_SIZE);                                           \
+        __pkvm_bss_end = .;
+
+#define PKVM_DATA                                                       \
+        . = ALIGN(PAGE_SIZE);                                           \
+        __pkvm_data_start = .;                                          \
+        *(PKVM_SECTION_NAME(.data))                                     \
+        . = ALIGN(PAGE_SIZE);                                           \
+        __pkvm_data_end = .;
+#else
+#define PKVM_TEXT
+#define PKVM_BSS
+#define PKVM_DATA
+#endif
+
 SECTIONS
 {
 #ifdef CONFIG_X86_32
@@ -129,15 +158,13 @@ SECTIONS
 		HEAD_TEXT
 		TEXT_TEXT
 		SCHED_TEXT
+                CPUIDLE_TEXT
 		LOCK_TEXT
 		KPROBES_TEXT
-		SOFTIRQENTRY_TEXT
 #ifdef CONFIG_RETPOLINE
 		*(.text..__x86.indirect_thunk)
 		*(.text..__x86.return_thunk)
 #endif
-		STATIC_CALL_TEXT
-
 		ALIGN_ENTRY_TEXT_BEGIN
 		*(.text..__x86.rethunk_untrain)
 		ENTRY_TEXT
@@ -151,6 +178,9 @@ SECTIONS
 		*(.text..__x86.rethunk_safe)
 #endif
 		ALIGN_ENTRY_TEXT_END
+		SOFTIRQENTRY_TEXT
+		STATIC_CALL_TEXT
+                PKVM_TEXT
 		*(.gnu.warning)
 
 	} :text = 0xcccccccc
@@ -175,6 +205,7 @@ SECTIONS
 		/* 32 bit has nosave before _edata */
 		NOSAVE_DATA
 #endif
+                PKVM_DATA
 
 		PAGE_ALIGNED_DATA(PAGE_SIZE)
 
@@ -404,10 +435,10 @@ SECTIONS
 		. = ALIGN(PAGE_SIZE);
 		*(BSS_MAIN)
 		BSS_DECRYPTED
+                PKVM_BSS
 		. = ALIGN(PAGE_SIZE);
 		__bss_stop = .;
 	}
-
 	/*
 	 * The memory occupied from _text to here, __end_of_kernel_reserve, is
 	 * automatically reserved in setup_arch(). Anything after here must be
@@ -515,6 +546,10 @@ INIT_PER_CPU(irq_stack_backing_store);
 #ifdef CONFIG_SMP
 . = ASSERT((fixed_percpu_data == 0),
            "fixed_percpu_data is not at start of per-cpu area");
+#endif
+
+#ifdef CONFIG_PKVM_INTEL
+#include <asm/pkvm_image_vars.h>
 #endif
 
 #ifdef CONFIG_CPU_UNRET_ENTRY

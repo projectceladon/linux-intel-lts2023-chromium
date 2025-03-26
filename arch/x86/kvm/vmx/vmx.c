@@ -48,6 +48,7 @@
 #include <asm/mwait.h>
 #include <asm/spec-ctrl.h>
 #include <asm/vmx.h>
+#include <asm/kvm_pkvm.h>
 
 #include "capabilities.h"
 #include "cpuid.h"
@@ -2751,6 +2752,7 @@ static bool __kvm_is_vmx_supported(void)
 		pr_err("VMX not supported by CPU %d\n", cpu);
 		return false;
 	}
+
 
 	if (!this_cpu_has(X86_FEATURE_MSR_IA32_FEAT_CTL) ||
 	    !this_cpu_has(X86_FEATURE_VMX)) {

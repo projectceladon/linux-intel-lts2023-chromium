@@ -222,6 +222,7 @@ struct nested_vmx {
 	 * detect that, and the garbage value in vmcs02 will be overwritten by
 	 * MSR restoration in any case.
 	 */
+	u64 vmcs01_debugctl;
 	u64 pre_vmenter_debugctl;
 	u64 pre_vmenter_bndcfgs;
 

@@ -4399,8 +4399,15 @@ static bool is_page_fault_stale(struct kvm_vcpu *vcpu,
 static int direct_page_fault(struct kvm_vcpu *vcpu, struct kvm_page_fault *fault)
 {
 	int r;
-
+        struct kvm_pinned_page *ppage = NULL;
 	/* Dummy roots are used only for shadowing bad guest roots. */
+
+        if (vcpu->kvm->arch.vm_type == KVM_X86_PROTECTED_VM) {
+               ppage = kmalloc(sizeof(*ppage), GFP_KERNEL_ACCOUNT);
+               if (!ppage)
+                     return -ENOMEM;
+        }
+
 	if (WARN_ON_ONCE(kvm_mmu_is_dummy_root(vcpu->arch.mmu->root.hpa)))
 		return RET_PF_RETRY;
 
@@ -4430,6 +4437,18 @@ static int direct_page_fault(struct kvm_vcpu *vcpu, struct kvm_page_fault *fault
 		goto out_unlock;
 
 	r = direct_map(vcpu, fault);
+
+//        if (ppage) {
+//               if (r == RET_PF_FIXED && !kvm_is_reserved_pfn(fault->pfn)) {
+//                       ppage->page = pfn_to_page(fault->pfn);
+ //                      get_page(ppage->page);
+  //                     spin_lock(&vcpu->kvm->pkvm.pinned_page_lock);
+   //                    list_add(&ppage->list, &vcpu->kvm->pkvm.pinned_pages);
+    //                   spin_unlock(&vcpu->kvm->pkvm.pinned_page_lock);
+     //    } else {
+      //                  kfree(ppage);
+       //  }
+
 
 out_unlock:
 	kvm_set_page_accessed(fault->accessed_page);

@@ -7,6 +7,10 @@
 
 #ifdef __ASSEMBLY__
 
+.macro UNWIND_HINT_EMPTY
+        UNWIND_HINT type=UNWIND_HINT_TYPE_CALL signal=1
+.endm
+
 .macro UNWIND_HINT_END_OF_STACK
 	UNWIND_HINT type=UNWIND_HINT_TYPE_END_OF_STACK
 .endm

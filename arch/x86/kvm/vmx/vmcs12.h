@@ -117,7 +117,11 @@ struct __packed vmcs12 {
 	natural_width host_ia32_sysenter_eip;
 	natural_width host_rsp;
 	natural_width host_rip;
-	natural_width paddingl[8]; /* room for future expansion */
+        natural_width exit_io_rcx;
+        natural_width exit_io_rsi;
+        natural_width exit_io_rdi;
+        natural_width exit_io_rip;
+	natural_width paddingl[4]; /* room for future expansion */
 	u32 pin_based_vm_exec_control;
 	u32 cpu_based_vm_exec_control;
 	u32 exception_bitmap;
@@ -165,7 +169,9 @@ struct __packed vmcs12 {
 	u32 guest_sysenter_cs;
 	u32 host_ia32_sysenter_cs;
 	u32 vmx_preemption_timer_value;
-	u32 padding32[7]; /* room for future expansion */
+	u32 ple_gap;
+        u32 ple_window;
+	u32 padding32[5]; /* room for future expansion */
 	u16 virtual_processor_id;
 	u16 posted_intr_nv;
 	u16 guest_es_selector;
