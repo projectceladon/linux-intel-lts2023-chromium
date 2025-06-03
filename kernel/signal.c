@@ -1205,6 +1205,7 @@ out_set:
 	complete_signal(sig, t, type);
 ret:
 	trace_signal_generate(sig, info, t, type != PIDTYPE_PID, result);
+	trace_android_vh_send_signal_locked(result, ret, sig, t, type, info);
 	return ret;
 }
 
@@ -1324,6 +1325,7 @@ int do_send_sig_info(int sig, struct kernel_siginfo *info, struct task_struct *p
 
 	return ret;
 }
+EXPORT_SYMBOL_GPL(do_send_sig_info);
 
 enum sig_handler {
 	HANDLER_CURRENT, /* If reachable use the current handler */
@@ -2013,14 +2015,15 @@ int send_sigqueue(struct sigqueue *q, struct pid *pid, enum pid_type type)
 	 * into t->pending).
 	 *
 	 * Where type is not PIDTYPE_PID, signals must be delivered to the
-	 * process. In this case, prefer to deliver to current if it is in
-	 * the same thread group as the target process, which avoids
-	 * unnecessarily waking up a potentially idle task.
+	 * process. In this case, prefer to deliver to current if it is in the
+	 * same thread group as the target process and its sighand is stable,
+	 * which avoids unnecessarily waking up a potentially idle task.
 	 */
 	t = pid_task(pid, type);
 	if (!t)
 		goto ret;
-	if (type != PIDTYPE_PID && same_thread_group(t, current))
+	if (type != PIDTYPE_PID &&
+	    same_thread_group(t, current) && !current->exit_state)
 		t = current;
 	if (!likely(lock_task_sighand(t, &flags)))
 		goto ret;
